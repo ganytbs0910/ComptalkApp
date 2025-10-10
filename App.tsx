@@ -9,6 +9,10 @@ import {
   useColorScheme,
   View,
 } from 'react-native';
+import Home from './Scripts/Home/HomeComponents';
+import Search from './Scripts/Search/SearchComponents';
+import Notifications from './Scripts/Notifications/NotificationsComponents';
+import Profile from './Scripts/Profile/ProfileComponents';
 
 type TabType = 'home' | 'search' | 'notifications' | 'profile';
 
@@ -23,37 +27,13 @@ function App(): React.JSX.Element {
   const renderContent = () => {
     switch (activeTab) {
       case 'home':
-        return (
-          <View style={styles.content}>
-            <Text style={[styles.contentText, { color: isDarkMode ? '#fff' : '#000' }]}>
-              ホーム画面
-            </Text>
-          </View>
-        );
+        return <Home />;
       case 'search':
-        return (
-          <View style={styles.content}>
-            <Text style={[styles.contentText, { color: isDarkMode ? '#fff' : '#000' }]}>
-              検索画面
-            </Text>
-          </View>
-        );
+        return <Search />;
       case 'notifications':
-        return (
-          <View style={styles.content}>
-            <Text style={[styles.contentText, { color: isDarkMode ? '#fff' : '#000' }]}>
-              通知画面
-            </Text>
-          </View>
-        );
+        return <Notifications />;
       case 'profile':
-        return (
-          <View style={styles.content}>
-            <Text style={[styles.contentText, { color: isDarkMode ? '#fff' : '#000' }]}>
-              プロフィール画面
-            </Text>
-          </View>
-        );
+        return <Profile />;
     }
   };
 
@@ -109,16 +89,6 @@ function App(): React.JSX.Element {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-  },
-  content: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    minHeight: 500,
-  },
-  contentText: {
-    fontSize: 24,
-    fontWeight: '600',
   },
   tabBar: {
     flexDirection: 'row',
