@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import {
   SafeAreaView,
-  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
@@ -13,16 +12,30 @@ import Home from './Scripts/Home/HomeComponents';
 import Search from './Scripts/Search/SearchComponents';
 import Notifications from './Scripts/Notifications/NotificationsComponents';
 import Profile from './Scripts/Profile/ProfileComponents';
+import Auth from './Scripts/Auth/AuthComponents';
 
 type TabType = 'home' | 'search' | 'notifications' | 'profile';
 
 function App(): React.JSX.Element {
   const isDarkMode = useColorScheme() === 'dark';
   const [activeTab, setActiveTab] = useState<TabType>('home');
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
 
   const backgroundStyle = {
     backgroundColor: isDarkMode ? '#000' : '#fff',
   };
+
+  if (!isLoggedIn) {
+    return (
+      <SafeAreaView style={[styles.container, backgroundStyle]}>
+        <StatusBar
+          barStyle={isDarkMode ? 'light-content' : 'dark-content'}
+          backgroundColor={backgroundStyle.backgroundColor}
+        />
+        <Auth onLoginSuccess={() => setIsLoggedIn(true)} />
+      </SafeAreaView>
+    );
+  }
 
   const renderContent = () => {
     switch (activeTab) {
@@ -43,42 +56,40 @@ function App(): React.JSX.Element {
         barStyle={isDarkMode ? 'light-content' : 'dark-content'}
         backgroundColor={backgroundStyle.backgroundColor}
       />
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        style={backgroundStyle}>
+      <View style={styles.contentContainer}>
         {renderContent()}
-      </ScrollView>
+      </View>
       
       <View style={[styles.tabBar, { borderTopColor: isDarkMode ? '#333' : '#e0e0e0' }]}>
         <TouchableOpacity
           style={styles.tab}
           onPress={() => setActiveTab('home')}>
-          <Text style={[styles.tabText, activeTab === 'home' && styles.activeTabText]}>
-            ホーム
+          <Text style={[styles.tabIcon, activeTab !== 'home' && styles.inactiveIcon]}>
+            🏠
           </Text>
         </TouchableOpacity>
         
         <TouchableOpacity
           style={styles.tab}
           onPress={() => setActiveTab('search')}>
-          <Text style={[styles.tabText, activeTab === 'search' && styles.activeTabText]}>
-            検索
+          <Text style={[styles.tabIcon, activeTab !== 'search' && styles.inactiveIcon]}>
+            🔍
           </Text>
         </TouchableOpacity>
         
         <TouchableOpacity
           style={styles.tab}
           onPress={() => setActiveTab('notifications')}>
-          <Text style={[styles.tabText, activeTab === 'notifications' && styles.activeTabText]}>
-            通知
+          <Text style={[styles.tabIcon, activeTab !== 'notifications' && styles.inactiveIcon]}>
+            🔔
           </Text>
         </TouchableOpacity>
         
         <TouchableOpacity
           style={styles.tab}
           onPress={() => setActiveTab('profile')}>
-          <Text style={[styles.tabText, activeTab === 'profile' && styles.activeTabText]}>
-            プロフィール
+          <Text style={[styles.tabIcon, activeTab !== 'profile' && styles.inactiveIcon]}>
+            👤
           </Text>
         </TouchableOpacity>
       </View>
@@ -88,6 +99,9 @@ function App(): React.JSX.Element {
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
+  },
+  contentContainer: {
     flex: 1,
   },
   tabBar: {
@@ -100,13 +114,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
   },
-  tabText: {
-    fontSize: 14,
-    color: '#888',
+  tabIcon: {
+    fontSize: 24,
   },
-  activeTabText: {
-    color: '#1DA1F2',
-    fontWeight: '600',
+  inactiveIcon: {
+    opacity: 0.4,
   },
 });
 
