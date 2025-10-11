@@ -10,9 +10,14 @@ import {
   ActivityIndicator,
   ScrollView,
   Image,
+  Modal,
 } from 'react-native';
 import { supabase } from '../supabaseClient';
 import { launchImageLibrary } from 'react-native-image-picker';
+
+interface ProfileComponentsProps {
+  onLogout?: () => void;
+}
 
 interface Profile {
   id: string;
@@ -25,15 +30,98 @@ interface Profile {
   complex_level: number;
 }
 
-const COMPLEX_LEVELS = [
-  { level: 1, label: 'レベル1', description: '少し気になる' },
-  { level: 2, label: 'レベル2', description: '気になる' },
-  { level: 3, label: 'レベル3', description: 'かなり気になる' },
-  { level: 4, label: 'レベル4', description: '非常に気になる' },
-  { level: 5, label: 'レベル5', description: '深刻に悩んでいる' },
+interface UserComplex {
+  id: string;
+  category: string;
+  level: number;
+}
+
+const generateLevels = (max: number, unit: string = '') => {
+  return Array.from({ length: max }, (_, i) => ({
+    level: i + 1,
+    label: `レベル${i + 1}`,
+    description: unit ? `${(i + 1) * 10}${unit}` : `レベル${i + 1}`,
+  }));
+};
+
+const COMPLEX_CATEGORIES = [
+  { 
+    key: 'appearance', 
+    label: '容姿', 
+    icon: '👤',
+    maxLevel: 10,
+    levels: generateLevels(10)
+  },
+  { 
+    key: 'debt', 
+    label: '借金', 
+    icon: '💰',
+    maxLevel: 100,
+    levels: Array.from({ length: 100 }, (_, i) => ({
+      level: i + 1,
+      label: `${(i + 1) * 10}万円`,
+      description: `${(i + 1) * 10}万円`,
+    }))
+  },
+  { 
+    key: 'job', 
+    label: '仕事', 
+    icon: '💼',
+    maxLevel: 10,
+    levels: generateLevels(10)
+  },
+  { 
+    key: 'education', 
+    label: '学歴', 
+    icon: '🎓',
+    maxLevel: 10,
+    levels: generateLevels(10)
+  },
+  { 
+    key: 'health', 
+    label: '健康', 
+    icon: '🏥',
+    maxLevel: 10,
+    levels: generateLevels(10)
+  },
+  { 
+    key: 'relationship', 
+    label: '人間関係', 
+    icon: '👥',
+    maxLevel: 10,
+    levels: generateLevels(10)
+  },
+  { 
+    key: 'family', 
+    label: '家族', 
+    icon: '👨‍👩‍👧',
+    maxLevel: 10,
+    levels: generateLevels(10)
+  },
+  { 
+    key: 'income', 
+    label: '収入', 
+    icon: '💵',
+    maxLevel: 10,
+    levels: generateLevels(10)
+  },
+  { 
+    key: 'age', 
+    label: '年齢', 
+    icon: '🎂',
+    maxLevel: 10,
+    levels: generateLevels(10)
+  },
+  { 
+    key: 'personality', 
+    label: '性格', 
+    icon: '🎭',
+    maxLevel: 10,
+    levels: generateLevels(10)
+  },
 ];
 
-function ProfileComponents() {
+function ProfileComponents({ onLogout }: ProfileComponentsProps) {
   const isDarkMode = useColorScheme() === 'dark';
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -43,11 +131,77 @@ function ProfileComponents() {
   const [name, setName] = useState('');
   const [bio, setBio] = useState('');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
-  const [complexLevel, setComplexLevel] = useState<number>(1);
+  const [followersCount, setFollowersCount] = useState<number>(0);
+  const [followingCount, setFollowingCount] = useState<number>(0);
+  const [userComplexes, setUserComplexes] = useState<UserComplex[]>([]);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [selectedLevel, setSelectedLevel] = useState<number>(1);
+  const [totalComplexLevel, setTotalComplexLevel] = useState<number>(0);
 
   useEffect(() => {
     fetchProfile();
+    
+    const followsSubscription = supabase
+      .channel('profile_follows_changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'follows' },
+        () => {
+          fetchFollowCounts();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      followsSubscription.unsubscribe();
+    };
   }, []);
+
+  useEffect(() => {
+    calculateTotalComplexLevel();
+  }, [userComplexes]);
+
+  const calculateTotalComplexLevel = () => {
+    if (userComplexes.length === 0) {
+      setTotalComplexLevel(0);
+      return;
+    }
+
+    let totalScore = 0;
+
+    userComplexes.forEach(userComplex => {
+      const category = COMPLEX_CATEGORIES.find(c => c.key === userComplex.category);
+      if (category) {
+        totalScore += userComplex.level;
+      }
+    });
+
+    const clampedLevel = Math.min(100, totalScore);
+    setTotalComplexLevel(clampedLevel);
+  };
+
+  const updateProfileComplexLevel = async (level: number) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+
+      if (!user) return;
+
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          complex_level: level,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', user.id);
+
+      if (error) {
+        console.error('総合レベル更新エラー:', error);
+      }
+    } catch (error) {
+      console.error('予期しないエラー:', error);
+    }
+  };
 
   const fetchProfile = async () => {
     try {
@@ -74,11 +228,58 @@ function ProfileComponents() {
       setName(data.name || '');
       setBio(data.bio || '');
       setAvatarUrl(data.avatar_url);
-      setComplexLevel(data.complex_level || 1);
+
+      await fetchFollowCounts();
+      await fetchUserComplexes();
     } catch (error) {
       console.error('予期しないエラー:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchFollowCounts = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+
+      if (!user) return;
+
+      const { count: followersCount } = await supabase
+        .from('follows')
+        .select('*', { count: 'exact', head: true })
+        .eq('following_id', user.id);
+
+      const { count: followingCount } = await supabase
+        .from('follows')
+        .select('*', { count: 'exact', head: true })
+        .eq('follower_id', user.id);
+
+      setFollowersCount(followersCount || 0);
+      setFollowingCount(followingCount || 0);
+    } catch (error) {
+      console.error('フォロー数取得エラー:', error);
+    }
+  };
+
+  const fetchUserComplexes = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+
+      if (!user) return;
+
+      const { data, error } = await supabase
+        .from('user_complexes')
+        .select('*')
+        .eq('user_id', user.id);
+
+      if (error) {
+        console.error('コンプレックス取得エラー:', error);
+        return;
+      }
+
+      setUserComplexes(data || []);
+    } catch (error) {
+      console.error('予期しないエラー:', error);
     }
   };
 
@@ -190,7 +391,6 @@ function ProfileComponents() {
           email: email,
           name: name || null,
           bio: bio || null,
-          complex_level: complexLevel,
           updated_at: new Date().toISOString(),
         })
         .eq('id', user.id);
@@ -210,6 +410,121 @@ function ProfileComponents() {
     }
   };
 
+  const openComplexModal = (categoryKey: string) => {
+    const category = COMPLEX_CATEGORIES.find(c => c.key === categoryKey);
+    const existing = userComplexes.find(c => c.category === categoryKey);
+    
+    setSelectedCategory(categoryKey);
+    setSelectedLevel(existing?.level || 1);
+    setModalVisible(true);
+  };
+
+  const saveComplex = async () => {
+    if (!selectedCategory) return;
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+
+      if (!user) {
+        Alert.alert('エラー', 'ログインが必要です');
+        return;
+      }
+
+      const { error } = await supabase
+        .from('user_complexes')
+        .upsert({
+          user_id: user.id,
+          category: selectedCategory,
+          level: selectedLevel,
+          updated_at: new Date().toISOString(),
+        }, {
+          onConflict: 'user_id,category'
+        });
+
+      if (error) {
+        Alert.alert('保存エラー', error.message);
+        return;
+      }
+
+      setModalVisible(false);
+      await fetchUserComplexes();
+      
+      setTimeout(() => {
+        updateProfileComplexLevel(totalComplexLevel);
+      }, 100);
+    } catch (error) {
+      Alert.alert('エラー', '予期しないエラーが発生しました');
+      console.error(error);
+    }
+  };
+
+  const removeComplex = async (category: string) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+
+      if (!user) return;
+
+      const { error } = await supabase
+        .from('user_complexes')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('category', category);
+
+      if (error) {
+        Alert.alert('削除エラー', error.message);
+        return;
+      }
+
+      await fetchUserComplexes();
+      
+      setTimeout(() => {
+        updateProfileComplexLevel(totalComplexLevel);
+      }, 100);
+    } catch (error) {
+      Alert.alert('エラー', '予期しないエラーが発生しました');
+      console.error(error);
+    }
+  };
+
+  const handleLogout = () => {
+    Alert.alert(
+      'ログアウト',
+      'ログアウトしますか?',
+      [
+        { text: 'キャンセル', style: 'cancel' },
+        {
+          text: 'ログアウト',
+          style: 'destructive',
+          onPress: () => {
+            if (onLogout) {
+              onLogout();
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const getLevelColor = (level: number) => {
+    if (level <= 20) return '#4CAF50';
+    if (level <= 40) return '#8BC34A';
+    if (level <= 60) return '#FFC107';
+    if (level <= 80) return '#FF9800';
+    return '#F44336';
+  };
+
+  const getCategoryData = (categoryKey: string) => {
+    return COMPLEX_CATEGORIES.find(c => c.key === categoryKey);
+  };
+
+  const getCategoryLabel = (category: string) => {
+    return COMPLEX_CATEGORIES.find(c => c.key === category)?.label || category;
+  };
+
+  const getCategoryIcon = (category: string) => {
+    return COMPLEX_CATEGORIES.find(c => c.key === category)?.icon || '📌';
+  };
+
   if (loading) {
     return (
       <View style={styles.content}>
@@ -217,6 +532,8 @@ function ProfileComponents() {
       </View>
     );
   }
+
+  const selectedCategoryData = selectedCategory ? getCategoryData(selectedCategory) : null;
 
   return (
     <ScrollView style={styles.container}>
@@ -244,6 +561,26 @@ function ProfileComponents() {
         <Text style={[styles.avatarHint, { color: isDarkMode ? '#888' : '#666' }]}>
           タップして画像を変更
         </Text>
+      </View>
+
+      <View style={styles.statsContainer}>
+        <View style={styles.statItem}>
+          <Text style={[styles.statNumber, { color: isDarkMode ? '#fff' : '#000' }]}>
+            {followersCount}
+          </Text>
+          <Text style={[styles.statLabel, { color: isDarkMode ? '#888' : '#666' }]}>
+            フォロワー
+          </Text>
+        </View>
+        <View style={styles.statDivider} />
+        <View style={styles.statItem}>
+          <Text style={[styles.statNumber, { color: isDarkMode ? '#fff' : '#000' }]}>
+            {followingCount}
+          </Text>
+          <Text style={[styles.statLabel, { color: isDarkMode ? '#888' : '#666' }]}>
+            フォロー中
+          </Text>
+        </View>
       </View>
 
       <View style={styles.inputContainer}>
@@ -315,51 +652,63 @@ function ProfileComponents() {
       </View>
 
       <View style={styles.complexContainer}>
-        <Text style={[styles.sectionTitle, { color: isDarkMode ? '#fff' : '#000' }]}>
-          コンプレックスレベル
-        </Text>
+        <View style={styles.complexHeader}>
+          <Text style={[styles.sectionTitle, { color: isDarkMode ? '#fff' : '#000' }]}>
+            コンプレックス
+          </Text>
+          <View style={[styles.totalLevelBadge, { backgroundColor: getLevelColor(totalComplexLevel) }]}>
+            <Text style={styles.totalLevelText}>
+              総合レベル {totalComplexLevel}/100
+            </Text>
+          </View>
+        </View>
         
-        <View style={styles.complexLevelContainer}>
-          {COMPLEX_LEVELS.map((level) => (
-            <TouchableOpacity
-              key={level.level}
-              style={[
-                styles.complexLevelButton,
-                {
-                  backgroundColor: complexLevel === level.level
-                    ? '#1DA1F2'
-                    : isDarkMode ? '#1a1a1a' : '#f5f5f5',
-                  borderColor: complexLevel === level.level
-                    ? '#1DA1F2'
-                    : isDarkMode ? '#333' : '#ddd',
-                },
-              ]}
-              onPress={() => setComplexLevel(level.level)}
-              disabled={saving}>
-              <Text
+        <View style={styles.complexCategoriesContainer}>
+          {COMPLEX_CATEGORIES.map((category) => {
+            const userComplex = userComplexes.find(c => c.category === category.key);
+            const isSelected = !!userComplex;
+
+            return (
+              <TouchableOpacity
+                key={category.key}
                 style={[
-                  styles.complexLevelLabel,
+                  styles.categoryCard,
                   {
-                    color: complexLevel === level.level
-                      ? '#fff'
-                      : isDarkMode ? '#fff' : '#000',
-                  },
-                ]}>
-                {level.label}
-              </Text>
-              <Text
-                style={[
-                  styles.complexLevelDescription,
-                  {
-                    color: complexLevel === level.level
-                      ? '#fff'
-                      : isDarkMode ? '#888' : '#666',
-                  },
-                ]}>
-                {level.description}
-              </Text>
-            </TouchableOpacity>
-          ))}
+                    backgroundColor: isSelected
+                      ? (isDarkMode ? '#0a2a3a' : '#e3f2fd')
+                      : (isDarkMode ? '#1a1a1a' : '#f5f5f5'),
+                    borderColor: isSelected
+                      ? getLevelColor(userComplex?.level || 0)
+                      : (isDarkMode ? '#333' : '#ddd'),
+                  }
+                ]}
+                onPress={() => openComplexModal(category.key)}>
+                <View style={styles.categoryHeader}>
+                  <Text style={styles.categoryIcon}>{category.icon}</Text>
+                  <Text style={[styles.categoryLabel, { color: isDarkMode ? '#fff' : '#000' }]}>
+                    {category.label}
+                  </Text>
+                  {isSelected && (
+                    <TouchableOpacity
+                      style={styles.removeButton}
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        removeComplex(category.key);
+                      }}>
+                      <Text style={styles.removeButtonText}>×</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+                {isSelected && (
+                  <View style={styles.categoryLevel}>
+                    <Text style={[styles.levelIndicator, { color: getLevelColor(userComplex?.level || 0) }]}>
+                      Lv.{userComplex?.level}
+                    </Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            );
+          })}
         </View>
       </View>
 
@@ -384,6 +733,83 @@ function ProfileComponents() {
           <Text style={styles.saveButtonText}>保存</Text>
         )}
       </TouchableOpacity>
+
+      <TouchableOpacity
+        style={styles.logoutButton}
+        onPress={handleLogout}>
+        <Text style={styles.logoutButtonText}>ログアウト</Text>
+      </TouchableOpacity>
+
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={modalVisible}
+        onRequestClose={() => setModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: isDarkMode ? '#000' : '#fff' }]}>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: isDarkMode ? '#fff' : '#000' }]}>
+                {selectedCategory && getCategoryIcon(selectedCategory)} {selectedCategory && getCategoryLabel(selectedCategory)}
+              </Text>
+              <TouchableOpacity onPress={() => setModalVisible(false)}>
+                <Text style={[styles.closeButton, { color: isDarkMode ? '#fff' : '#000' }]}>×</Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={[styles.modalSubtitle, { color: isDarkMode ? '#888' : '#666' }]}>
+              レベルを選択してください (最大: {selectedCategoryData?.maxLevel})
+            </Text>
+
+            <ScrollView style={styles.levelSelectionContainer}>
+              {selectedCategoryData?.levels.map((level) => (
+                <TouchableOpacity
+                  key={level.level}
+                  style={[
+                    styles.levelSelectionButton,
+                    {
+                      backgroundColor: selectedLevel === level.level
+                        ? getLevelColor(level.level)
+                        : isDarkMode ? '#1a1a1a' : '#f5f5f5',
+                      borderColor: selectedLevel === level.level
+                        ? getLevelColor(level.level)
+                        : isDarkMode ? '#333' : '#ddd',
+                    },
+                  ]}
+                  onPress={() => setSelectedLevel(level.level)}>
+                  <Text
+                    style={[
+                      styles.levelSelectionLabel,
+                      {
+                        color: selectedLevel === level.level
+                          ? '#fff'
+                          : isDarkMode ? '#fff' : '#000',
+                      },
+                    ]}>
+                    {level.label}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.levelSelectionDescription,
+                      {
+                        color: selectedLevel === level.level
+                          ? '#fff'
+                          : isDarkMode ? '#888' : '#666',
+                      },
+                    ]}>
+                    {level.description}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            <TouchableOpacity
+              style={styles.modalSaveButton}
+              onPress={saveComplex}>
+              <Text style={styles.modalSaveButtonText}>保存</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -406,7 +832,7 @@ const styles = StyleSheet.create({
   },
   avatarContainer: {
     alignItems: 'center',
-    marginBottom: 30,
+    marginBottom: 20,
   },
   avatarWrapper: {
     position: 'relative',
@@ -441,6 +867,30 @@ const styles = StyleSheet.create({
     marginTop: 10,
     fontSize: 14,
   },
+  statsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 30,
+    paddingVertical: 15,
+  },
+  statItem: {
+    alignItems: 'center',
+    paddingHorizontal: 30,
+  },
+  statNumber: {
+    fontSize: 24,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  statLabel: {
+    fontSize: 14,
+  },
+  statDivider: {
+    width: 1,
+    height: 40,
+    backgroundColor: '#333',
+  },
   inputContainer: {
     marginBottom: 20,
   },
@@ -468,26 +918,70 @@ const styles = StyleSheet.create({
     marginTop: 10,
     marginBottom: 20,
   },
+  complexHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
   sectionTitle: {
     fontSize: 20,
     fontWeight: '700',
-    marginBottom: 20,
   },
-  complexLevelContainer: {
+  totalLevelBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  totalLevelText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  complexCategoriesContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 10,
   },
-  complexLevelButton: {
+  categoryCard: {
+    width: '48%',
     padding: 15,
     borderRadius: 10,
-    borderWidth: 1,
+    borderWidth: 2,
   },
-  complexLevelLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 4,
+  categoryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 5,
   },
-  complexLevelDescription: {
+  categoryIcon: {
+    fontSize: 20,
+    marginRight: 8,
+  },
+  categoryLabel: {
     fontSize: 14,
+    fontWeight: '600',
+    flex: 1,
+  },
+  removeButton: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#F44336',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  removeButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  categoryLevel: {
+    marginTop: 5,
+  },
+  levelIndicator: {
+    fontSize: 12,
+    fontWeight: '600',
   },
   infoContainer: {
     marginTop: 20,
@@ -503,12 +997,84 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 40,
+    marginBottom: 10,
   },
   saveButtonDisabled: {
     opacity: 0.6,
   },
   saveButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  logoutButton: {
+    height: 50,
+    backgroundColor: '#F44336',
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 40,
+  },
+  logoutButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    maxHeight: '80%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  closeButton: {
+    fontSize: 32,
+    fontWeight: '300',
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    marginBottom: 20,
+  },
+  levelSelectionContainer: {
+    maxHeight: 400,
+    marginBottom: 20,
+  },
+  levelSelectionButton: {
+    padding: 15,
+    borderRadius: 10,
+    borderWidth: 2,
+    marginBottom: 10,
+  },
+  levelSelectionLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  levelSelectionDescription: {
+    fontSize: 14,
+  },
+  modalSaveButton: {
+    height: 50,
+    backgroundColor: '#1DA1F2',
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalSaveButtonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
