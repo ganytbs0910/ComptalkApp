@@ -12,6 +12,7 @@ import {
   FlatList,
   Image,
   ScrollView,
+  RefreshControl,
 } from 'react-native';
 import { supabase } from '../supabaseClient';
 
@@ -30,19 +31,7 @@ interface Post {
   replies_count: number;
   is_following: boolean;
   post_complexes?: Array<{ category: string }>;
-}
-
-interface Reply {
-  id: string;
-  post_id: string;
-  user_id: string;
-  content: string;
-  created_at: string;
-  profiles: {
-    name: string | null;
-    avatar_url: string | null;
-    complex_level: number;
-  };
+  engagement_score?: number;
 }
 
 const COMPLEX_CATEGORIES = [
@@ -58,31 +47,34 @@ const COMPLEX_CATEGORIES = [
   { key: 'personality', label: '性格', icon: '🎭' },
 ];
 
+type FeedType = 'all' | 'following' | 'trending';
+
 export default function Home() {
   const isDarkMode = useColorScheme() === 'dark';
   const [modalVisible, setModalVisible] = useState(false);
   const [postContent, setPostContent] = useState('');
   const [loading, setLoading] = useState(false);
-  const [posts, setPosts] = useState<Post[]>([]);
-  const [loadingPosts, setLoadingPosts] = useState(true);
+  const [allPosts, setAllPosts] = useState<Post[]>([]);
+  const [trendingPosts, setTrendingPosts] = useState<Post[]>([]);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [userLikedPosts, setUserLikedPosts] = useState<Set<string>>(new Set());
   const [userSharedPosts, setUserSharedPosts] = useState<Set<string>>(new Set());
   const [userBookmarkedPosts, setUserBookmarkedPosts] = useState<Set<string>>(new Set());
   const [followingUsers, setFollowingUsers] = useState<Set<string>>(new Set());
   const [blockedUsers, setBlockedUsers] = useState<Set<string>>(new Set());
-  const [showFollowingOnly, setShowFollowingOnly] = useState(false);
+  const [feedType, setFeedType] = useState<FeedType>('all');
   const [selectedComplexes, setSelectedComplexes] = useState<Set<string>>(new Set());
   const [replyModalVisible, setReplyModalVisible] = useState(false);
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const [replyContent, setReplyContent] = useState('');
-  const [replies, setReplies] = useState<Reply[]>([]);
-  const [loadingReplies, setLoadingReplies] = useState(false);
   const [postingReply, setPostingReply] = useState(false);
+  const [timeRange, setTimeRange] = useState<'day' | 'week' | 'month'>('week');
 
   useEffect(() => {
     getCurrentUser();
-    fetchPosts();
+    fetchAllData();
 
     const likesSubscription = supabase
       .channel('likes_changes')
@@ -90,7 +82,7 @@ export default function Home() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'likes' },
         () => {
-          fetchPosts();
+          // リアルタイム更新は手動リフレッシュに任せる
         }
       )
       .subscribe();
@@ -101,7 +93,7 @@ export default function Home() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'shares' },
         () => {
-          fetchPosts();
+          // リアルタイム更新は手動リフレッシュに任せる
         }
       )
       .subscribe();
@@ -112,7 +104,7 @@ export default function Home() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'follows' },
         () => {
-          fetchPosts();
+          // リアルタイム更新は手動リフレッシュに任せる
         }
       )
       .subscribe();
@@ -147,10 +139,23 @@ export default function Home() {
     }
   };
 
+  const fetchAllData = async () => {
+    await Promise.all([
+      fetchPosts(),
+      fetchTrendingPosts(),
+      fetchUserInteractions(),
+    ]);
+    setInitialLoading(false);
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await fetchAllData();
+    setRefreshing(false);
+  };
+
   const fetchPosts = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-
       const { data, error } = await supabase
         .from('posts')
         .select(`
@@ -172,7 +177,7 @@ export default function Home() {
       }
 
       if (!data) {
-        setPosts([]);
+        setAllPosts([]);
         return;
       }
 
@@ -203,58 +208,141 @@ export default function Home() {
         })
       );
 
-      setPosts(postsWithCounts);
+      setAllPosts(postsWithCounts);
+    } catch (error) {
+      console.error('予期しないエラー:', error);
+    }
+  };
 
-      if (user) {
-        const { data: likedData } = await supabase
-          .from('likes')
-          .select('post_id')
-          .eq('user_id', user.id);
+  const fetchTrendingPosts = async () => {
+    try {
+      let daysAgo = 7;
+      if (timeRange === 'day') daysAgo = 1;
+      if (timeRange === 'month') daysAgo = 30;
 
-        const { data: sharedData } = await supabase
-          .from('shares')
-          .select('post_id')
-          .eq('user_id', user.id);
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - daysAgo);
 
-        const { data: bookmarkedData } = await supabase
-          .from('bookmarks')
-          .select('post_id')
-          .eq('user_id', user.id);
+      const { data: postsData, error } = await supabase
+        .from('posts')
+        .select(`
+          *,
+          profiles (
+            name,
+            avatar_url,
+            complex_level
+          ),
+          post_complexes (
+            category
+          )
+        `)
+        .gte('created_at', cutoffDate.toISOString())
+        .order('created_at', { ascending: false });
 
-        const { data: followingData } = await supabase
-          .from('follows')
-          .select('following_id')
-          .eq('follower_id', user.id);
+      if (error) {
+        console.error('投稿取得エラー:', error);
+        return;
+      }
 
-        const { data: blockedData } = await supabase
-          .from('blocks')
-          .select('blocked_id')
-          .eq('blocker_id', user.id);
+      if (!postsData) {
+        setTrendingPosts([]);
+        return;
+      }
 
-        if (likedData) {
-          setUserLikedPosts(new Set(likedData.map(like => like.post_id)));
-        }
+      const postsWithEngagement = await Promise.all(
+        postsData.map(async (post) => {
+          const { count: likesCount } = await supabase
+            .from('likes')
+            .select('*', { count: 'exact', head: true })
+            .eq('post_id', post.id);
 
-        if (sharedData) {
-          setUserSharedPosts(new Set(sharedData.map(share => share.post_id)));
-        }
+          const { count: sharesCount } = await supabase
+            .from('shares')
+            .select('*', { count: 'exact', head: true })
+            .eq('post_id', post.id);
 
-        if (bookmarkedData) {
-          setUserBookmarkedPosts(new Set(bookmarkedData.map(b => b.post_id)));
-        }
+          const { count: repliesCount } = await supabase
+            .from('replies')
+            .select('*', { count: 'exact', head: true })
+            .eq('post_id', post.id);
 
-        if (followingData) {
-          setFollowingUsers(new Set(followingData.map(follow => follow.following_id)));
-        }
+          const engagement_score = 
+            (likesCount || 0) * 3 + 
+            (repliesCount || 0) * 2 + 
+            (sharesCount || 0) * 5;
 
-        if (blockedData) {
-          setBlockedUsers(new Set(blockedData.map(b => b.blocked_id)));
-        }
+          return {
+            ...post,
+            likes_count: likesCount || 0,
+            shares_count: sharesCount || 0,
+            replies_count: repliesCount || 0,
+            engagement_score,
+          };
+        })
+      );
+
+      const sorted = postsWithEngagement
+        .sort((a, b) => b.engagement_score! - a.engagement_score!)
+        .slice(0, 20);
+
+      setTrendingPosts(sorted);
+    } catch (error) {
+      console.error('予期しないエラー:', error);
+    }
+  };
+
+  const fetchUserInteractions = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+
+      if (!user) return;
+
+      const { data: likedData } = await supabase
+        .from('likes')
+        .select('post_id')
+        .eq('user_id', user.id);
+
+      const { data: sharedData } = await supabase
+        .from('shares')
+        .select('post_id')
+        .eq('user_id', user.id);
+
+      const { data: bookmarkedData } = await supabase
+        .from('bookmarks')
+        .select('post_id')
+        .eq('user_id', user.id);
+
+      const { data: followingData } = await supabase
+        .from('follows')
+        .select('following_id')
+        .eq('follower_id', user.id);
+
+      const { data: blockedData } = await supabase
+        .from('blocks')
+        .select('blocked_id')
+        .eq('blocker_id', user.id);
+
+      if (likedData) {
+        setUserLikedPosts(new Set(likedData.map(like => like.post_id)));
+      }
+
+      if (sharedData) {
+        setUserSharedPosts(new Set(sharedData.map(share => share.post_id)));
+      }
+
+      if (bookmarkedData) {
+        setUserBookmarkedPosts(new Set(bookmarkedData.map(b => b.post_id)));
+      }
+
+      if (followingData) {
+        setFollowingUsers(new Set(followingData.map(follow => follow.following_id)));
+      }
+
+      if (blockedData) {
+        setBlockedUsers(new Set(blockedData.map(b => b.blocked_id)));
       }
     } catch (error) {
       console.error('予期しないエラー:', error);
-    } finally {
-      setLoadingPosts(false);
     }
   };
 
@@ -311,7 +399,9 @@ export default function Home() {
       setSelectedComplexes(new Set());
       setModalVisible(false);
       Alert.alert('成功', '投稿しました');
-      fetchPosts();
+      
+      // 投稿後はデータを再取得
+      await fetchAllData();
     } catch (error) {
       Alert.alert('エラー', '予期しないエラーが発生しました');
     } finally {
@@ -342,10 +432,28 @@ export default function Home() {
     }
 
     setUserLikedPosts(prev => new Set([...prev, postId]));
-    setPosts(prevPosts => 
+    
+    // UIを即座に更新
+    setAllPosts(prevPosts => 
       prevPosts.map(post => 
         post.id === postId 
-          ? { ...post, likes_count: post.likes_count + 1 }
+          ? { 
+              ...post, 
+              likes_count: post.likes_count + 1,
+              engagement_score: post.engagement_score ? post.engagement_score + 3 : undefined
+            }
+          : post
+      )
+    );
+    
+    setTrendingPosts(prevPosts => 
+      prevPosts.map(post => 
+        post.id === postId 
+          ? { 
+              ...post, 
+              likes_count: post.likes_count + 1,
+              engagement_score: post.engagement_score ? post.engagement_score + 3 : undefined
+            }
           : post
       )
     );
@@ -356,33 +464,40 @@ export default function Home() {
         .insert({ post_id: postId, user_id: currentUserId });
 
       if (error) {
+        // エラー時はロールバック
         setUserLikedPosts(prev => {
           const newSet = new Set(prev);
           newSet.delete(postId);
           return newSet;
         });
-        setPosts(prevPosts => 
+        
+        setAllPosts(prevPosts => 
           prevPosts.map(post => 
             post.id === postId 
-              ? { ...post, likes_count: post.likes_count - 1 }
+              ? { 
+                  ...post, 
+                  likes_count: post.likes_count - 1,
+                  engagement_score: post.engagement_score ? post.engagement_score - 3 : undefined
+                }
               : post
           )
         );
+        
+        setTrendingPosts(prevPosts => 
+          prevPosts.map(post => 
+            post.id === postId 
+              ? { 
+                  ...post, 
+                  likes_count: post.likes_count - 1,
+                  engagement_score: post.engagement_score ? post.engagement_score - 3 : undefined
+                }
+              : post
+          )
+        );
+        
         console.error('いいねエラー:', error);
       }
     } catch (error) {
-      setUserLikedPosts(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(postId);
-        return newSet;
-      });
-      setPosts(prevPosts => 
-        prevPosts.map(post => 
-          post.id === postId 
-            ? { ...post, likes_count: post.likes_count - 1 }
-            : post
-        )
-      );
       console.error('いいねエラー:', error);
     }
   };
@@ -398,10 +513,27 @@ export default function Home() {
     }
 
     setUserSharedPosts(prev => new Set([...prev, postId]));
-    setPosts(prevPosts => 
+    
+    setAllPosts(prevPosts => 
       prevPosts.map(post => 
         post.id === postId 
-          ? { ...post, shares_count: post.shares_count + 1 }
+          ? { 
+              ...post, 
+              shares_count: post.shares_count + 1,
+              engagement_score: post.engagement_score ? post.engagement_score + 5 : undefined
+            }
+          : post
+      )
+    );
+    
+    setTrendingPosts(prevPosts => 
+      prevPosts.map(post => 
+        post.id === postId 
+          ? { 
+              ...post, 
+              shares_count: post.shares_count + 1,
+              engagement_score: post.engagement_score ? post.engagement_score + 5 : undefined
+            }
           : post
       )
     );
@@ -417,28 +549,34 @@ export default function Home() {
           newSet.delete(postId);
           return newSet;
         });
-        setPosts(prevPosts => 
+        
+        setAllPosts(prevPosts => 
           prevPosts.map(post => 
             post.id === postId 
-              ? { ...post, shares_count: post.shares_count - 1 }
+              ? { 
+                  ...post, 
+                  shares_count: post.shares_count - 1,
+                  engagement_score: post.engagement_score ? post.engagement_score - 5 : undefined
+                }
               : post
           )
         );
+        
+        setTrendingPosts(prevPosts => 
+          prevPosts.map(post => 
+            post.id === postId 
+              ? { 
+                  ...post, 
+                  shares_count: post.shares_count - 1,
+                  engagement_score: post.engagement_score ? post.engagement_score - 5 : undefined
+                }
+              : post
+          )
+        );
+        
         console.error('共有エラー:', error);
       }
     } catch (error) {
-      setUserSharedPosts(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(postId);
-        return newSet;
-      });
-      setPosts(prevPosts => 
-        prevPosts.map(post => 
-          post.id === postId 
-            ? { ...post, shares_count: post.shares_count - 1 }
-            : post
-        )
-      );
       console.error('共有エラー:', error);
     }
   };
@@ -570,7 +708,7 @@ export default function Home() {
 
     Alert.alert(
       'ユーザーをブロック',
-      'このユーザーをブロックしますか？ブロックすると、このユーザーの投稿が表示されなくなり、相互のフォロー関係が解除されます。',
+      'このユーザーをブロックしますか?ブロックすると、このユーザーの投稿が表示されなくなり、相互のフォロー関係が解除されます。',
       [
         { text: 'キャンセル', style: 'cancel' },
         {
@@ -589,7 +727,9 @@ export default function Home() {
 
               setBlockedUsers(prev => new Set([...prev, userId]));
               Alert.alert('完了', 'ユーザーをブロックしました');
-              fetchPosts();
+              
+              // ブロック後はデータを再取得
+              await fetchAllData();
             } catch (error) {
               Alert.alert('エラー', '予期しないエラーが発生しました');
             }
@@ -615,39 +755,16 @@ export default function Home() {
     return COMPLEX_CATEGORIES.find(c => c.key === category)?.icon || '📌';
   };
 
-  const openReplyModal = async (post: Post) => {
-    setSelectedPost(post);
-    setReplyModalVisible(true);
-    await fetchReplies(post.id);
+  const getRankColor = (index: number) => {
+    if (index === 0) return '#FFD700';
+    if (index === 1) return '#C0C0C0';
+    if (index === 2) return '#CD7F32';
+    return '#1DA1F2';
   };
 
-  const fetchReplies = async (postId: string) => {
-    setLoadingReplies(true);
-    try {
-      const { data, error } = await supabase
-        .from('replies')
-        .select(`
-          *,
-          profiles (
-            name,
-            avatar_url,
-            complex_level
-          )
-        `)
-        .eq('post_id', postId)
-        .order('created_at', { ascending: true });
-
-      if (error) {
-        console.error('リプライ取得エラー:', error);
-        return;
-      }
-
-      setReplies(data || []);
-    } catch (error) {
-      console.error('予期しないエラー:', error);
-    } finally {
-      setLoadingReplies(false);
-    }
+  const openReplyModal = (post: Post) => {
+    setSelectedPost(post);
+    setReplyModalVisible(true);
   };
 
   const handleReply = async () => {
@@ -681,13 +798,30 @@ export default function Home() {
       }
 
       setReplyContent('');
+      setReplyModalVisible(false);
       Alert.alert('成功', 'リプライしました');
-      await fetchReplies(selectedPost.id);
       
-      setPosts(prevPosts =>
+      // UIを即座に更新
+      setAllPosts(prevPosts =>
         prevPosts.map(post =>
           post.id === selectedPost.id
-            ? { ...post, replies_count: post.replies_count + 1 }
+            ? { 
+                ...post, 
+                replies_count: post.replies_count + 1,
+                engagement_score: post.engagement_score ? post.engagement_score + 2 : undefined
+              }
+            : post
+        )
+      );
+      
+      setTrendingPosts(prevPosts =>
+        prevPosts.map(post =>
+          post.id === selectedPost.id
+            ? { 
+                ...post, 
+                replies_count: post.replies_count + 1,
+                engagement_score: post.engagement_score ? post.engagement_score + 2 : undefined
+              }
             : post
         )
       );
@@ -698,159 +832,223 @@ export default function Home() {
     }
   };
 
-  const renderPost = ({ item }: { item: Post }) => {
+  const renderPost = ({ item, index }: { item: Post; index?: number }) => {
     const isLiked = userLikedPosts.has(item.id);
     const isShared = userSharedPosts.has(item.id);
     const isBookmarked = userBookmarkedPosts.has(item.id);
     const isFollowing = followingUsers.has(item.user_id);
     const isOwnPost = currentUserId === item.user_id;
+    const isTopThree = feedType === 'trending' && index !== undefined && index < 3;
 
     return (
-      <TouchableOpacity
-        activeOpacity={0.7}
-        onPress={() => openReplyModal(item)}>
-        <View style={[styles.postCard, { backgroundColor: isDarkMode ? '#1a1a1a' : '#f5f5f5' }]}>
-          <View style={styles.postHeader}>
-            <View style={styles.userInfo}>
-              {item.profiles?.avatar_url ? (
-                <Image source={{ uri: item.profiles.avatar_url }} style={styles.avatar} />
-              ) : (
-                <View style={[styles.avatarPlaceholder, { backgroundColor: isDarkMode ? '#333' : '#ddd' }]}>
-                  <Text style={styles.avatarPlaceholderText}>👤</Text>
-                </View>
-              )}
-              <View style={styles.userDetails}>
-                <Text style={[styles.userName, { color: isDarkMode ? '#fff' : '#000' }]}>
-                  {item.profiles?.name || '名前未設定'}
-                </Text>
-                <View style={styles.levelBadge}>
-                  <Text style={[styles.levelText, { color: getLevelColor(item.profiles?.complex_level || 0) }]}>
-                    コンプレックスレベル {item.profiles?.complex_level || 0}
-                  </Text>
-                </View>
+      <View style={[styles.postCard, { backgroundColor: isDarkMode ? '#1a1a1a' : '#f5f5f5' }]}>
+        {isTopThree && (
+          <View style={[styles.rankBadge, { backgroundColor: getRankColor(index!) }]}>
+            <Text style={styles.rankText}>{index! + 1}</Text>
+          </View>
+        )}
+
+        <View style={styles.postHeader}>
+          <View style={styles.userInfo}>
+            {item.profiles?.avatar_url ? (
+              <Image source={{ uri: item.profiles.avatar_url }} style={styles.avatar} />
+            ) : (
+              <View style={[styles.avatarPlaceholder, { backgroundColor: isDarkMode ? '#333' : '#ddd' }]}>
+                <Image 
+                  source={require('../../assets/icon/profile.png')}
+                  style={[styles.avatarPlaceholderText, { tintColor: isDarkMode ? '#fff' : '#666' }]}
+                />
               </View>
-              {!isOwnPost && (
-                <>
-                  <TouchableOpacity
-                    style={[
-                      styles.followButton,
-                      isFollowing && styles.followingButton,
-                      { backgroundColor: isFollowing ? (isDarkMode ? '#333' : '#e0e0e0') : '#1DA1F2' }
-                    ]}
-                    onPress={(e) => {
-                      e.stopPropagation();
-                      handleFollow(item.user_id);
-                    }}>
-                    <Text style={[styles.followButtonText, isFollowing && { color: isDarkMode ? '#fff' : '#000' }]}>
-                      {isFollowing ? 'フォロー中' : 'フォロー'}
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.menuButton}
-                    onPress={(e) => {
-                      e.stopPropagation();
-                      Alert.alert(
-                        'メニュー',
-                        '',
-                        [
-                          { text: 'キャンセル', style: 'cancel' },
-                          {
-                            text: 'ブロック',
-                            style: 'destructive',
-                            onPress: () => handleBlock(item.user_id)
-                          }
-                        ]
-                      );
-                    }}>
-                    <Text style={styles.menuIcon}>⋮</Text>
-                  </TouchableOpacity>
-                </>
-              )}
+            )}
+            <View style={styles.userDetails}>
+              <Text style={[styles.userName, { color: isDarkMode ? '#fff' : '#000' }]}>
+                {item.profiles?.name || '名前未設定'}
+              </Text>
+              <View style={styles.levelBadge}>
+                <Text style={[styles.levelText, { color: getLevelColor(item.profiles?.complex_level || 0) }]}>
+                  コンプレックスレベル {item.profiles?.complex_level || 0}
+                </Text>
+              </View>
             </View>
-            <Text style={styles.postTime}>
-              {getTimeAgo(item.created_at)}
-            </Text>
-          </View>
-
-          {item.post_complexes && item.post_complexes.length > 0 && (
-            <View style={styles.postComplexesContainer}>
-              {item.post_complexes.map((complex, index) => (
-                <View key={index} style={[styles.complexChip, { backgroundColor: isDarkMode ? '#0a2a3a' : '#e3f2fd' }]}>
-                  <Text style={styles.complexChipIcon}>{getCategoryIcon(complex.category)}</Text>
-                  <Text style={[styles.complexChipText, { color: isDarkMode ? '#fff' : '#000' }]}>
-                    {getCategoryLabel(complex.category)}
+            {!isOwnPost && (
+              <>
+                <TouchableOpacity
+                  style={[
+                    styles.followButton,
+                    isFollowing && styles.followingButton,
+                    { backgroundColor: isFollowing ? (isDarkMode ? '#333' : '#e0e0e0') : '#1DA1F2' }
+                  ]}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    handleFollow(item.user_id);
+                  }}>
+                  <Text style={[styles.followButtonText, isFollowing && { color: isDarkMode ? '#fff' : '#000' }]}>
+                    {isFollowing ? 'フォロー中' : 'フォロー'}
                   </Text>
-                </View>
-              ))}
-            </View>
-          )}
-
-          <Text style={[styles.postContent, { color: isDarkMode ? '#fff' : '#000' }]}>
-            {item.content}
-          </Text>
-          
-          <View style={styles.actionsContainer}>
-            <TouchableOpacity 
-              style={[styles.actionButton, isLiked && styles.actionButtonActive]}
-              onPress={(e) => {
-                e.stopPropagation();
-                handleLike(item.id);
-              }}
-              disabled={isLiked}>
-              <Text style={[styles.actionIcon, isLiked && styles.actionIconActive]}>❤️</Text>
-              <Text style={[styles.actionCount, { color: isDarkMode ? '#fff' : '#000' }]}>
-                {item.likes_count}
-              </Text>
-            </TouchableOpacity>
-
-            <View style={styles.actionButton}>
-              <Text style={styles.actionIcon}>💬</Text>
-              <Text style={[styles.actionCount, { color: isDarkMode ? '#fff' : '#000' }]}>
-                {item.replies_count}
-              </Text>
-            </View>
-
-            <TouchableOpacity 
-              style={[styles.actionButton, isShared && styles.actionButtonActive]}
-              onPress={(e) => {
-                e.stopPropagation();
-                handleShare(item.id);
-              }}
-              disabled={isShared}>
-              <Text style={[styles.actionIcon, isShared && styles.actionIconActive]}>🔁</Text>
-              <Text style={[styles.actionCount, { color: isDarkMode ? '#fff' : '#000' }]}>
-                {item.shares_count}
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity 
-              style={[styles.actionButton, isBookmarked && styles.actionButtonActive]}
-              onPress={(e) => {
-                e.stopPropagation();
-                handleBookmark(item.id);
-              }}>
-              <Text style={[styles.actionIcon, isBookmarked && styles.actionIconActive]}>🔖</Text>
-            </TouchableOpacity>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.menuButton}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    Alert.alert(
+                      'メニュー',
+                      '',
+                      [
+                        { text: 'キャンセル', style: 'cancel' },
+                        {
+                          text: 'ブロック',
+                          style: 'destructive',
+                          onPress: () => handleBlock(item.user_id)
+                        }
+                      ]
+                    );
+                  }}>
+                  <Image
+                    source={require('../../assets/icon/setting.png')}
+                    style={[styles.menuIcon, { tintColor: isDarkMode ? '#fff' : '#666' }]}
+                  />
+                </TouchableOpacity>
+              </>
+            )}
           </View>
+          <Text style={styles.postTime}>
+            {getTimeAgo(item.created_at)}
+          </Text>
         </View>
-      </TouchableOpacity>
+
+        {item.post_complexes && item.post_complexes.length > 0 && (
+          <View style={styles.postComplexesContainer}>
+            {item.post_complexes.map((complex, idx) => (
+              <View key={idx} style={[styles.complexChip, { backgroundColor: isDarkMode ? '#0a2a3a' : '#e3f2fd' }]}>
+                <Text style={styles.complexChipIcon}>{getCategoryIcon(complex.category)}</Text>
+                <Text style={[styles.complexChipText, { color: isDarkMode ? '#fff' : '#000' }]}>
+                  {getCategoryLabel(complex.category)}
+                </Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        <Text style={[styles.postContent, { color: isDarkMode ? '#fff' : '#000' }]}>
+          {item.content}
+        </Text>
+
+        {feedType === 'trending' && item.engagement_score !== undefined && (
+          <View style={styles.engagementContainer}>
+            <View style={styles.engagementScore}>
+              <Text style={[styles.engagementScoreText, { color: '#1DA1F2' }]}>
+                🔥 エンゲージメント: {item.engagement_score}
+              </Text>
+            </View>
+          </View>
+        )}
+        
+        <View style={styles.actionsContainer}>
+          <TouchableOpacity 
+            style={[styles.actionButton, isLiked && styles.actionButtonActive]}
+            onPress={(e) => {
+              e.stopPropagation();
+              handleLike(item.id);
+            }}
+            disabled={isLiked}>
+            <Image 
+              source={require('../../assets/icon/heart.png')}
+              style={[
+                styles.actionIcon, 
+                isLiked && styles.actionIconActive,
+                { tintColor: isLiked ? '#e91e63' : (isDarkMode ? '#fff' : '#666') }
+              ]}
+            />
+            <Text style={[styles.actionCount, { color: isDarkMode ? '#fff' : '#000' }]}>
+              {item.likes_count}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={styles.actionButton}
+            onPress={(e) => {
+              e.stopPropagation();
+              openReplyModal(item);
+            }}>
+            <Image 
+              source={require('../../assets/icon/comment.png')}
+              style={[
+                styles.actionIcon,
+                { tintColor: isDarkMode ? '#fff' : '#666' }
+              ]}
+            />
+            <Text style={[styles.actionCount, { color: isDarkMode ? '#fff' : '#000' }]}>
+              {item.replies_count}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={[styles.actionButton, isShared && styles.actionButtonActive]}
+            onPress={(e) => {
+              e.stopPropagation();
+              handleShare(item.id);
+            }}
+            disabled={isShared}>
+            <Image 
+              source={require('../../assets/icon/post.png')}
+              style={[
+                styles.actionIcon, 
+                isShared && styles.actionIconActive,
+                { tintColor: isShared ? '#1DA1F2' : (isDarkMode ? '#fff' : '#666') }
+              ]}
+            />
+            <Text style={[styles.actionCount, { color: isDarkMode ? '#fff' : '#000' }]}>
+              {item.shares_count}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={[styles.actionButton, isBookmarked && styles.actionButtonActive]}
+            onPress={(e) => {
+              e.stopPropagation();
+              handleBookmark(item.id);
+            }}>
+            <Image 
+              source={require('../../assets/icon/book.png')}
+              style={[
+                styles.actionIcon, 
+                isBookmarked && styles.actionIconActive,
+                { tintColor: isBookmarked ? '#1DA1F2' : (isDarkMode ? '#fff' : '#666') }
+              ]}
+            />
+          </TouchableOpacity>
+        </View>
+      </View>
     );
   };
 
-  const getFilteredPosts = () => {
-    let filtered = posts;
+  const getDisplayPosts = () => {
+    let postsToDisplay = feedType === 'trending' ? trendingPosts : allPosts;
     
-    filtered = filtered.filter(post => !blockedUsers.has(post.user_id));
+    // ブロックユーザーをフィルタリング
+    postsToDisplay = postsToDisplay.filter(post => !blockedUsers.has(post.user_id));
     
-    if (!showFollowingOnly) {
-      return filtered;
+    // フォロー中フィードのフィルタリング
+    if (feedType === 'following') {
+      postsToDisplay = postsToDisplay.filter(post => 
+        followingUsers.has(post.user_id) || post.user_id === currentUserId
+      );
     }
-    return filtered.filter(post => 
-      followingUsers.has(post.user_id) || post.user_id === currentUserId
-    );
+    
+    return postsToDisplay;
   };
 
-  const filteredPosts = getFilteredPosts();
+  const displayPosts = getDisplayPosts();
+
+  if (initialLoading) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.content}>
+          <ActivityIndicator size="large" color="#1DA1F2" />
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -858,14 +1056,14 @@ export default function Home() {
         <TouchableOpacity
           style={[
             styles.toggleButton,
-            !showFollowingOnly && styles.toggleButtonActive,
-            !showFollowingOnly && { borderBottomColor: '#1DA1F2' }
+            feedType === 'all' && styles.toggleButtonActive,
+            feedType === 'all' && { borderBottomColor: '#1DA1F2' }
           ]}
-          onPress={() => setShowFollowingOnly(false)}>
+          onPress={() => setFeedType('all')}>
           <Text style={[
             styles.toggleButtonText,
             { color: isDarkMode ? '#fff' : '#000' },
-            !showFollowingOnly && styles.toggleButtonTextActive
+            feedType === 'all' && styles.toggleButtonTextActive
           ]}>
             すべて
           </Text>
@@ -874,43 +1072,129 @@ export default function Home() {
         <TouchableOpacity
           style={[
             styles.toggleButton,
-            showFollowingOnly && styles.toggleButtonActive,
-            showFollowingOnly && { borderBottomColor: '#1DA1F2' }
+            feedType === 'following' && styles.toggleButtonActive,
+            feedType === 'following' && { borderBottomColor: '#1DA1F2' }
           ]}
-          onPress={() => setShowFollowingOnly(true)}>
+          onPress={() => setFeedType('following')}>
           <Text style={[
             styles.toggleButtonText,
             { color: isDarkMode ? '#fff' : '#000' },
-            showFollowingOnly && styles.toggleButtonTextActive
+            feedType === 'following' && styles.toggleButtonTextActive
           ]}>
             フォロー中
           </Text>
         </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.toggleButton,
+            feedType === 'trending' && styles.toggleButtonActive,
+            feedType === 'trending' && { borderBottomColor: '#1DA1F2' }
+          ]}
+          onPress={() => setFeedType('trending')}>
+          <Text style={[
+            styles.toggleButtonText,
+            { color: isDarkMode ? '#fff' : '#000' },
+            feedType === 'trending' && styles.toggleButtonTextActive
+          ]}>
+            トレンド
+          </Text>
+        </TouchableOpacity>
       </View>
 
-      {loadingPosts ? (
-        <View style={styles.content}>
-          <ActivityIndicator size="large" color="#1DA1F2" />
+      {feedType === 'trending' && (
+        <View style={[styles.timeRangeContainer, { borderBottomColor: isDarkMode ? '#333' : '#e0e0e0' }]}>
+          <TouchableOpacity
+            style={[
+              styles.timeRangeButton,
+              timeRange === 'day' && styles.timeRangeButtonActive,
+              timeRange === 'day' && { borderBottomColor: '#1DA1F2' }
+            ]}
+            onPress={() => {
+              setTimeRange('day');
+              onRefresh();
+            }}>
+            <Text style={[
+              styles.timeRangeButtonText,
+              { color: isDarkMode ? '#fff' : '#000' },
+              timeRange === 'day' && styles.timeRangeButtonTextActive
+            ]}>
+              24時間
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.timeRangeButton,
+              timeRange === 'week' && styles.timeRangeButtonActive,
+              timeRange === 'week' && { borderBottomColor: '#1DA1F2' }
+            ]}
+            onPress={() => {
+              setTimeRange('week');
+              onRefresh();
+            }}>
+            <Text style={[
+              styles.timeRangeButtonText,
+              { color: isDarkMode ? '#fff' : '#000' },
+              timeRange === 'week' && styles.timeRangeButtonTextActive
+            ]}>
+              7日間
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.timeRangeButton,
+              timeRange === 'month' && styles.timeRangeButtonActive,
+              timeRange === 'month' && { borderBottomColor: '#1DA1F2' }
+            ]}
+            onPress={() => {
+              setTimeRange('month');
+              onRefresh();
+            }}>
+            <Text style={[
+              styles.timeRangeButtonText,
+              { color: isDarkMode ? '#fff' : '#000' },
+              timeRange === 'month' && styles.timeRangeButtonTextActive
+            ]}>
+              30日間
+            </Text>
+          </TouchableOpacity>
         </View>
-      ) : filteredPosts.length === 0 ? (
+      )}
+
+      {displayPosts.length === 0 ? (
         <View style={styles.content}>
           <Text style={[styles.emptyText, { color: isDarkMode ? '#fff' : '#000' }]}>
-            {showFollowingOnly ? 'フォロー中のユーザーの投稿がありません' : 'まだ投稿がありません'}
+            {feedType === 'following' ? 'フォロー中のユーザーの投稿がありません' : 
+             feedType === 'trending' ? 'トレンド投稿がありません' : 
+             'まだ投稿がありません'}
           </Text>
         </View>
       ) : (
         <FlatList
-          data={filteredPosts}
+          data={displayPosts}
           renderItem={renderPost}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.postList}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor="#1DA1F2"
+              colors={['#1DA1F2']}
+            />
+          }
         />
       )}
 
       <TouchableOpacity
         style={styles.floatingButton}
         onPress={() => setModalVisible(true)}>
-        <Text style={styles.floatingButtonText}>✏️</Text>
+        <Image 
+          source={require('../../assets/icon/post.png')}
+          style={styles.floatingButtonText}
+        />
       </TouchableOpacity>
 
       <Modal
@@ -998,106 +1282,67 @@ export default function Home() {
         transparent={true}
         visible={replyModalVisible}
         onRequestClose={() => setReplyModalVisible(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: isDarkMode ? '#000' : '#fff' }]}>
-            <View style={styles.modalHeader}>
-              <TouchableOpacity onPress={() => setReplyModalVisible(false)}>
-                <Text style={[styles.cancelButton, { color: isDarkMode ? '#fff' : '#000' }]}>
-                  閉じる
-                </Text>
-              </TouchableOpacity>
-              <Text style={[styles.replyModalTitle, { color: isDarkMode ? '#fff' : '#000' }]}>
-                リプライ
-              </Text>
-              <View style={{ width: 60 }} />
-            </View>
-
+        <TouchableOpacity 
+          style={styles.replyModalOverlay}
+          activeOpacity={1}
+          onPress={() => setReplyModalVisible(false)}>
+          <TouchableOpacity 
+            style={[styles.replyModalContent, { backgroundColor: isDarkMode ? '#000' : '#fff' }]}
+            activeOpacity={1}
+            onPress={(e) => e.stopPropagation()}>
             {selectedPost && (
-              <View style={[styles.originalPost, { backgroundColor: isDarkMode ? '#1a1a1a' : '#f5f5f5' }]}>
-                <View style={styles.originalPostHeader}>
-                  {selectedPost.profiles?.avatar_url ? (
-                    <Image source={{ uri: selectedPost.profiles.avatar_url }} style={styles.smallAvatar} />
-                  ) : (
-                    <View style={[styles.smallAvatarPlaceholder, { backgroundColor: isDarkMode ? '#333' : '#ddd' }]}>
-                      <Text style={styles.smallAvatarPlaceholderText}>👤</Text>
-                    </View>
-                  )}
-                  <Text style={[styles.originalPostUser, { color: isDarkMode ? '#fff' : '#000' }]}>
-                    {selectedPost.profiles?.name || '名前未設定'}
+              <>
+                <View style={[styles.originalPost, { backgroundColor: isDarkMode ? '#1a1a1a' : '#f5f5f5' }]}>
+                  <View style={styles.originalPostHeader}>
+                    {selectedPost.profiles?.avatar_url ? (
+                      <Image source={{ uri: selectedPost.profiles.avatar_url }} style={styles.smallAvatar} />
+                    ) : (
+                      <View style={[styles.smallAvatarPlaceholder, { backgroundColor: isDarkMode ? '#333' : '#ddd' }]}>
+                        <Text style={styles.smallAvatarPlaceholderText}>👤</Text>
+                      </View>
+                    )}
+                    <Text style={[styles.originalPostUser, { color: isDarkMode ? '#fff' : '#000' }]}>
+                      {selectedPost.profiles?.name || '名前未設定'}
+                    </Text>
+                  </View>
+                  <Text style={[styles.originalPostContent, { color: isDarkMode ? '#fff' : '#000' }]}>
+                    {selectedPost.content}
                   </Text>
                 </View>
-                <Text style={[styles.originalPostContent, { color: isDarkMode ? '#fff' : '#000' }]}>
-                  {selectedPost.content}
-                </Text>
-              </View>
+
+                <View style={styles.replyInputContainer}>
+                  <TextInput
+                    style={[
+                      styles.replyInput,
+                      { 
+                        color: isDarkMode ? '#fff' : '#000',
+                        backgroundColor: isDarkMode ? '#1a1a1a' : '#f5f5f5',
+                        borderColor: isDarkMode ? '#333' : '#ddd'
+                      }
+                    ]}
+                    placeholder="リプライを入力..."
+                    placeholderTextColor={isDarkMode ? '#888' : '#999'}
+                    value={replyContent}
+                    onChangeText={setReplyContent}
+                    multiline
+                    autoFocus
+                    editable={!postingReply}
+                  />
+                  <TouchableOpacity
+                    style={[styles.replyButton, postingReply && styles.replyButtonDisabled]}
+                    onPress={handleReply}
+                    disabled={postingReply}>
+                    {postingReply ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <Text style={styles.replyButtonText}>送信</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </>
             )}
-
-            <View style={styles.replyInputContainer}>
-              <TextInput
-                style={[
-                  styles.replyInput,
-                  { color: isDarkMode ? '#fff' : '#000' }
-                ]}
-                placeholder="リプライを入力..."
-                placeholderTextColor={isDarkMode ? '#888' : '#999'}
-                value={replyContent}
-                onChangeText={setReplyContent}
-                multiline
-                editable={!postingReply}
-              />
-              <TouchableOpacity
-                style={[styles.replyButton, postingReply && styles.replyButtonDisabled]}
-                onPress={handleReply}
-                disabled={postingReply}>
-                {postingReply ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <Text style={styles.replyButtonText}>送信</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.repliesContainer}>
-              <Text style={[styles.repliesTitle, { color: isDarkMode ? '#fff' : '#000' }]}>
-                リプライ ({replies.length})
-              </Text>
-              {loadingReplies ? (
-                <ActivityIndicator size="large" color="#1DA1F2" style={{ marginTop: 20 }} />
-              ) : replies.length === 0 ? (
-                <Text style={[styles.noRepliesText, { color: isDarkMode ? '#888' : '#666' }]}>
-                  まだリプライがありません
-                </Text>
-              ) : (
-                <ScrollView style={styles.repliesList}>
-                  {replies.map((reply) => (
-                    <View key={reply.id} style={[styles.replyItem, { borderBottomColor: isDarkMode ? '#333' : '#e0e0e0' }]}>
-                      <View style={styles.replyHeader}>
-                        {reply.profiles?.avatar_url ? (
-                          <Image source={{ uri: reply.profiles.avatar_url }} style={styles.smallAvatar} />
-                        ) : (
-                          <View style={[styles.smallAvatarPlaceholder, { backgroundColor: isDarkMode ? '#333' : '#ddd' }]}>
-                            <Text style={styles.smallAvatarPlaceholderText}>👤</Text>
-                          </View>
-                        )}
-                        <View style={styles.replyUserInfo}>
-                          <Text style={[styles.replyUserName, { color: isDarkMode ? '#fff' : '#000' }]}>
-                            {reply.profiles?.name || '名前未設定'}
-                          </Text>
-                          <Text style={styles.replyTime}>
-                            {getTimeAgo(reply.created_at)}
-                          </Text>
-                        </View>
-                      </View>
-                      <Text style={[styles.replyContent, { color: isDarkMode ? '#fff' : '#000' }]}>
-                        {reply.content}
-                      </Text>
-                    </View>
-                  ))}
-                </ScrollView>
-              )}
-            </View>
-          </View>
-        </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
       </Modal>
     </View>
   );
@@ -1131,6 +1376,29 @@ const styles = StyleSheet.create({
     opacity: 1,
     color: '#1DA1F2',
   },
+  timeRangeContainer: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    backgroundColor: 'transparent',
+  },
+  timeRangeButton: {
+    flex: 1,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
+  timeRangeButtonActive: {
+  },
+  timeRangeButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    opacity: 0.6,
+  },
+  timeRangeButtonTextActive: {
+    opacity: 1,
+    color: '#1DA1F2',
+  },
   content: {
     flex: 1,
     justifyContent: 'center',
@@ -1147,6 +1415,23 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 8,
     marginBottom: 8,
+    position: 'relative',
+  },
+  rankBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1,
+  },
+  rankText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
   },
   postHeader: {
     flexDirection: 'row',
@@ -1172,7 +1457,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   avatarPlaceholderText: {
-    fontSize: 18,
+    width: 18,
+    height: 18,
   },
   userDetails: {
     marginLeft: 10,
@@ -1221,6 +1507,16 @@ const styles = StyleSheet.create({
     color: '#888',
     marginLeft: 8,
   },
+  engagementContainer: {
+    marginBottom: 8,
+  },
+  engagementScore: {
+    alignSelf: 'flex-start',
+  },
+  engagementScoreText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
   actionsContainer: {
     flexDirection: 'row',
     gap: 16,
@@ -1238,12 +1534,15 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(29, 161, 242, 0.1)',
   },
   actionIcon: {
-    fontSize: 16,
+    width: 16,
+    height: 16,
     opacity: 0.6,
+    tintColor: '#666',
   },
   actionIconActive: {
     opacity: 1,
     transform: [{ scale: 1.1 }],
+    tintColor: '#1DA1F2',
   },
   actionCount: {
     fontSize: 12,
@@ -1266,7 +1565,9 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   floatingButtonText: {
-    fontSize: 20,
+    width: 20,
+    height: 20,
+    tintColor: '#fff',
   },
   modalOverlay: {
     flex: 1,
@@ -1328,8 +1629,8 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
   menuIcon: {
-    fontSize: 20,
-    color: '#888',
+    width: 20,
+    height: 20,
   },
   complexSelectionContainer: {
     marginTop: 10,
@@ -1359,6 +1660,17 @@ const styles = StyleSheet.create({
   complexSelectionChipText: {
     fontSize: 13,
     fontWeight: '600',
+  },
+  replyModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  replyModalContent: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    maxHeight: '60%',
   },
   originalPost: {
     padding: 12,
@@ -1399,7 +1711,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: 10,
-    marginBottom: 20,
   },
   replyInput: {
     flex: 1,
@@ -1409,7 +1720,6 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderWidth: 1,
-    borderColor: '#333',
     borderRadius: 20,
   },
   replyButton: {
@@ -1425,54 +1735,5 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 14,
     fontWeight: '600',
-  },
-  replyModalTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  repliesContainer: {
-    flex: 1,
-  },
-  repliesTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 12,
-  },
-  noRepliesText: {
-    fontSize: 14,
-    textAlign: 'center',
-    marginTop: 20,
-  },
-  repliesList: {
-    flex: 1,
-  },
-  replyItem: {
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-  },
-  replyHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  replyUserInfo: {
-    marginLeft: 8,
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  replyUserName: {
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  replyTime: {
-    fontSize: 11,
-    color: '#888',
-  },
-  replyContent: {
-    fontSize: 14,
-    lineHeight: 20,
-    marginLeft: 38,
   },
 });

@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   SafeAreaView,
   StatusBar,
+  Image,
 } from 'react-native';
 import Home from './Scripts/Home/HomeComponents';
 import Search from './Scripts/Search/SearchComponents';
@@ -15,10 +16,9 @@ import Profile from './Scripts/Profile/ProfileComponents';
 import Bookmarks from './Scripts/Profile/BookmarksComponents';
 import Auth from './Scripts/Auth/AuthComponents';
 import Messages from './Scripts/Messages/MessagesComponents';
-import Trending from './Scripts/Home/TrendingComponents';
 import { supabase } from './Scripts/supabaseClient';
 
-type TabType = 'home' | 'search' | 'trending' | 'bookmarks' | 'notifications' | 'messages' | 'profile';
+type TabType = 'home' | 'search' | 'bookmarks' | 'notifications' | 'messages' | 'profile';
 
 export default function App() {
   const isDarkMode = useColorScheme() === 'dark';
@@ -120,8 +120,6 @@ export default function App() {
         return <Home />;
       case 'search':
         return <Search />;
-      case 'trending':
-        return <Trending />;
       case 'bookmarks':
         return <Bookmarks />;
       case 'notifications':
@@ -171,10 +169,14 @@ export default function App() {
         <TouchableOpacity
           style={styles.navButton}
           onPress={() => setActiveTab('home')}>
-          <Text style={[
-            styles.navIcon,
-            activeTab === 'home' && styles.navIconActive
-          ]}>🏠</Text>
+          <Image
+            source={require('./assets/icon/home.png')}
+            style={[
+              styles.navIcon,
+              activeTab === 'home' && styles.navIconActive,
+              { tintColor: activeTab === 'home' ? '#1DA1F2' : (isDarkMode ? '#fff' : '#000') }
+            ]}
+          />
           <Text style={[
             styles.navLabel,
             { color: isDarkMode ? '#fff' : '#000' },
@@ -185,10 +187,14 @@ export default function App() {
         <TouchableOpacity
           style={styles.navButton}
           onPress={() => setActiveTab('search')}>
-          <Text style={[
-            styles.navIcon,
-            activeTab === 'search' && styles.navIconActive
-          ]}>🔍</Text>
+          <Image
+            source={require('./assets/icon/search.png')}
+            style={[
+              styles.navIcon,
+              activeTab === 'search' && styles.navIconActive,
+              { tintColor: activeTab === 'search' ? '#1DA1F2' : (isDarkMode ? '#fff' : '#000') }
+            ]}
+          />
           <Text style={[
             styles.navLabel,
             { color: isDarkMode ? '#fff' : '#000' },
@@ -198,25 +204,15 @@ export default function App() {
 
         <TouchableOpacity
           style={styles.navButton}
-          onPress={() => setActiveTab('trending')}>
-          <Text style={[
-            styles.navIcon,
-            activeTab === 'trending' && styles.navIconActive
-          ]}>🔥</Text>
-          <Text style={[
-            styles.navLabel,
-            { color: isDarkMode ? '#fff' : '#000' },
-            activeTab === 'trending' && styles.navLabelActive
-          ]}>トレンド</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.navButton}
           onPress={() => setActiveTab('bookmarks')}>
-          <Text style={[
-            styles.navIcon,
-            activeTab === 'bookmarks' && styles.navIconActive
-          ]}>🔖</Text>
+          <Image
+            source={require('./assets/icon/book.png')}
+            style={[
+              styles.navIcon,
+              activeTab === 'bookmarks' && styles.navIconActive,
+              { tintColor: activeTab === 'bookmarks' ? '#1DA1F2' : (isDarkMode ? '#fff' : '#000') }
+            ]}
+          />
           <Text style={[
             styles.navLabel,
             { color: isDarkMode ? '#fff' : '#000' },
@@ -228,10 +224,14 @@ export default function App() {
           style={styles.navButton}
           onPress={() => setActiveTab('notifications')}>
           <View style={styles.navButtonContent}>
-            <Text style={[
-              styles.navIcon,
-              activeTab === 'notifications' && styles.navIconActive
-            ]}>🔔</Text>
+            <Image
+              source={require('./assets/icon/notification.png')}
+              style={[
+                styles.navIcon,
+                activeTab === 'notifications' && styles.navIconActive,
+                { tintColor: activeTab === 'notifications' ? '#1DA1F2' : (isDarkMode ? '#fff' : '#000') }
+              ]}
+            />
             {unreadNotifications > 0 && (
               <View style={styles.badge}>
                 <Text style={styles.badgeText}>
@@ -251,10 +251,14 @@ export default function App() {
           style={styles.navButton}
           onPress={() => setActiveTab('messages')}>
           <View style={styles.navButtonContent}>
-            <Text style={[
-              styles.navIcon,
-              activeTab === 'messages' && styles.navIconActive
-            ]}>💬</Text>
+            <Image
+              source={require('./assets/icon/comment.png')}
+              style={[
+                styles.navIcon,
+                activeTab === 'messages' && styles.navIconActive,
+                { tintColor: activeTab === 'messages' ? '#1DA1F2' : (isDarkMode ? '#fff' : '#000') }
+              ]}
+            />
             {unreadMessages > 0 && (
               <View style={styles.badge}>
                 <Text style={styles.badgeText}>
@@ -273,10 +277,14 @@ export default function App() {
         <TouchableOpacity
           style={styles.navButton}
           onPress={() => setActiveTab('profile')}>
-          <Text style={[
-            styles.navIcon,
-            activeTab === 'profile' && styles.navIconActive
-          ]}>👤</Text>
+          <Image
+            source={require('./assets/icon/profile.png')}
+            style={[
+              styles.navIcon,
+              activeTab === 'profile' && styles.navIconActive,
+              { tintColor: activeTab === 'profile' ? '#1DA1F2' : (isDarkMode ? '#fff' : '#000') }
+            ]}
+          />
           <Text style={[
             styles.navLabel,
             { color: isDarkMode ? '#fff' : '#000' },
@@ -319,13 +327,16 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   navIcon: {
-    fontSize: 24,
+    width: 24,
+    height: 24,
     marginBottom: 2,
     opacity: 0.6,
+    tintColor: '#000',
   },
   navIconActive: {
     opacity: 1,
     transform: [{ scale: 1.1 }],
+    tintColor: '#1DA1F2',
   },
   navLabel: {
     fontSize: 10,

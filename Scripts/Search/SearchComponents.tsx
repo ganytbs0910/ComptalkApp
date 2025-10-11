@@ -350,7 +350,14 @@ function SearchComponents() {
             style={[styles.actionButton, isLiked && styles.actionButtonActive]}
             onPress={() => handleLike(item.id)}
             disabled={isLiked}>
-            <Text style={[styles.actionIcon, isLiked && styles.actionIconActive]}>❤️</Text>
+            <Image 
+              source={require('../../assets/icon/heart.png')}
+              style={[
+                styles.actionIcon, 
+                isLiked && styles.actionIconActive,
+                { tintColor: isLiked ? '#e91e63' : (isDarkMode ? '#fff' : '#666') }
+              ]}
+            />
             <Text style={[styles.actionCount, { color: isDarkMode ? '#fff' : '#000' }]}>
               {item.likes_count}
             </Text>
@@ -360,7 +367,14 @@ function SearchComponents() {
             style={[styles.actionButton, isShared && styles.actionButtonActive]}
             onPress={() => handleShare(item.id)}
             disabled={isShared}>
-            <Text style={[styles.actionIcon, isShared && styles.actionIconActive]}>🔁</Text>
+            <Image 
+              source={require('../../assets/icon/post.png')}
+              style={[
+                styles.actionIcon, 
+                isShared && styles.actionIconActive,
+                { tintColor: isShared ? '#1DA1F2' : (isDarkMode ? '#fff' : '#666') }
+              ]}
+            />
             <Text style={[styles.actionCount, { color: isDarkMode ? '#fff' : '#000' }]}>
               {item.shares_count}
             </Text>
@@ -376,7 +390,10 @@ function SearchComponents() {
     <View style={styles.container}>
       <View style={[styles.searchHeader, { borderBottomColor: isDarkMode ? '#333' : '#e0e0e0' }]}>
         <View style={styles.searchInputContainer}>
-          <Text style={styles.searchIcon}>🔍</Text>
+          <Image 
+            source={require('../../assets/icon/search.png')}
+            style={[styles.searchIcon, { tintColor: isDarkMode ? '#888' : '#999' }]}
+          />
           <TextInput
             style={[styles.searchInput, { color: isDarkMode ? '#fff' : '#000' }]}
             placeholder="投稿を検索..."
@@ -394,7 +411,10 @@ function SearchComponents() {
         <TouchableOpacity
           style={[styles.filterButton, { backgroundColor: isDarkMode ? '#1a1a1a' : '#f5f5f5' }]}
           onPress={() => setModalVisible(true)}>
-          <Text style={styles.filterIcon}>⚙️</Text>
+          <Image 
+            source={require('../../assets/icon/setting.png')}
+            style={[styles.filterIcon, { tintColor: isDarkMode ? '#fff' : '#666' }]}
+          />
           {activeFiltersCount > 0 && (
             <View style={styles.filterBadge}>
               <Text style={styles.filterBadgeText}>{activeFiltersCount}</Text>
@@ -578,7 +598,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 15,
   },
   searchIcon: {
-    fontSize: 16,
+    width: 16,
+    height: 16,
     marginRight: 8,
   },
   searchInput: {
@@ -600,7 +621,8 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   filterIcon: {
-    fontSize: 18,
+    width: 18,
+    height: 18,
   },
   filterBadge: {
     position: 'absolute',
@@ -715,12 +737,14 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(29, 161, 242, 0.1)',
   },
   actionIcon: {
-    fontSize: 16,
+    width: 16,
+    height: 16,
     opacity: 0.6,
   },
   actionIconActive: {
     opacity: 1,
     transform: [{ scale: 1.1 }],
+    tintColor: '#1DA1F2',
   },
   actionCount: {
     fontSize: 12,

@@ -311,15 +311,33 @@ function BookmarksComponents() {
           </Text>
 
           <View style={styles.postStats}>
-            <Text style={[styles.statText, { color: isDarkMode ? '#888' : '#666' }]}>
-              ❤️ {item.likes_count}
-            </Text>
-            <Text style={[styles.statText, { color: isDarkMode ? '#888' : '#666' }]}>
-              💬 {item.replies_count}
-            </Text>
-            <Text style={[styles.statText, { color: isDarkMode ? '#888' : '#666' }]}>
-              🔁 {item.shares_count}
-            </Text>
+            <View style={styles.statItem}>
+              <Image 
+                source={require('../../assets/icon/heart.png')}
+                style={[styles.statIcon, { tintColor: isDarkMode ? '#888' : '#666' }]}
+              />
+              <Text style={[styles.statText, { color: isDarkMode ? '#888' : '#666' }]}>
+                {item.likes_count}
+              </Text>
+            </View>
+            <View style={styles.statItem}>
+              <Image 
+                source={require('../../assets/icon/comment.png')}
+                style={[styles.statIcon, { tintColor: isDarkMode ? '#888' : '#666' }]}
+              />
+              <Text style={[styles.statText, { color: isDarkMode ? '#888' : '#666' }]}>
+                {item.replies_count}
+              </Text>
+            </View>
+            <View style={styles.statItem}>
+              <Image 
+                source={require('../../assets/icon/post.png')}
+                style={[styles.statIcon, { tintColor: isDarkMode ? '#888' : '#666' }]}
+              />
+              <Text style={[styles.statText, { color: isDarkMode ? '#888' : '#666' }]}>
+                {item.shares_count}
+              </Text>
+            </View>
           </View>
         </TouchableOpacity>
 
@@ -562,6 +580,15 @@ const styles = StyleSheet.create({
     gap: 16,
     marginTop: 6,
     marginBottom: 10,
+  },
+  statItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  statIcon: {
+    width: 12,
+    height: 12,
   },
   statText: {
     fontSize: 12,

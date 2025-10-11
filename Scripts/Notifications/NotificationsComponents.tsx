@@ -247,13 +247,13 @@ function NotificationsComponents() {
   const getNotificationIcon = (type: string) => {
     switch (type) {
       case 'like':
-        return '❤️';
+        return require('../../assets/icon/heart.png');
       case 'reply':
-        return '💬';
+        return require('../../assets/icon/comment.png');
       case 'follow':
-        return '👤';
+        return require('../../assets/icon/profile.png');
       default:
-        return '🔔';
+        return require('../../assets/icon/notification.png');
     }
   };
 
@@ -276,9 +276,10 @@ function NotificationsComponents() {
           }
         }}>
         <View style={styles.notificationContent}>
-          <Text style={styles.notificationTypeIcon}>
-            {getNotificationIcon(item.type)}
-          </Text>
+          <Image
+            source={getNotificationIcon(item.type)}
+            style={[styles.notificationTypeIcon, { tintColor: isDarkMode ? '#fff' : '#666' }]}
+          />
           {item.profiles?.avatar_url ? (
             <Image
               source={{ uri: item.profiles.avatar_url }}
@@ -286,7 +287,10 @@ function NotificationsComponents() {
             />
           ) : (
             <View style={[styles.avatarPlaceholder, { backgroundColor: isDarkMode ? '#333' : '#ddd' }]}>
-              <Text style={styles.avatarPlaceholderText}>👤</Text>
+              <Image 
+                source={require('../../assets/icon/profile.png')}
+                style={[styles.avatarPlaceholderText, { tintColor: isDarkMode ? '#fff' : '#666' }]}
+              />
             </View>
           )}
           <View style={styles.notificationTextContainer}>
@@ -370,7 +374,10 @@ function NotificationsComponents() {
                       <Image source={{ uri: selectedPost.profiles.avatar_url }} style={styles.postAvatar} />
                     ) : (
                       <View style={[styles.postAvatarPlaceholder, { backgroundColor: isDarkMode ? '#333' : '#ddd' }]}>
-                        <Text style={styles.postAvatarPlaceholderText}>👤</Text>
+                        <Image 
+                          source={require('../../assets/icon/profile.png')}
+                          style={[styles.postAvatarPlaceholderText, { tintColor: isDarkMode ? '#fff' : '#666' }]}
+                        />
                       </View>
                     )}
                     <Text style={[styles.postUserName, { color: isDarkMode ? '#fff' : '#000' }]}>
@@ -399,7 +406,10 @@ function NotificationsComponents() {
                               <Image source={{ uri: reply.profiles.avatar_url }} style={styles.smallAvatar} />
                             ) : (
                               <View style={[styles.smallAvatarPlaceholder, { backgroundColor: isDarkMode ? '#333' : '#ddd' }]}>
-                                <Text style={styles.smallAvatarPlaceholderText}>👤</Text>
+                                <Image 
+                                  source={require('../../assets/icon/profile.png')}
+                                  style={[styles.smallAvatarPlaceholderText, { tintColor: isDarkMode ? '#fff' : '#666' }]}
+                                />
                               </View>
                             )}
                             <View style={styles.replyUserInfo}>
@@ -472,7 +482,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   notificationTypeIcon: {
-    fontSize: 24,
+    width: 24,
+    height: 24,
     marginRight: 8,
   },
   avatar: {
@@ -488,7 +499,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   avatarPlaceholderText: {
-    fontSize: 18,
+    width: 18,
+    height: 18,
   },
   notificationTextContainer: {
     flex: 1,
@@ -557,7 +569,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   postAvatarPlaceholderText: {
-    fontSize: 18,
+    width: 18,
+    height: 18,
   },
   postUserName: {
     fontSize: 15,
@@ -606,7 +619,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   smallAvatarPlaceholderText: {
-    fontSize: 14,
+    width: 14,
+    height: 14,
   },
   replyUserInfo: {
     marginLeft: 8,

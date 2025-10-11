@@ -305,14 +305,27 @@ function TrendingComponents() {
             style={[styles.actionButton, isLiked && styles.actionButtonActive]}
             onPress={() => handleLike(item.id)}
             disabled={isLiked}>
-            <Text style={[styles.actionIcon, isLiked && styles.actionIconActive]}>❤️</Text>
+            <Image 
+              source={require('../../assets/icon/heart.png')}
+              style={[
+                styles.actionIcon, 
+                isLiked && styles.actionIconActive,
+                { tintColor: isLiked ? '#e91e63' : (isDarkMode ? '#fff' : '#666') }
+              ]}
+            />
             <Text style={[styles.actionCount, { color: isDarkMode ? '#fff' : '#000' }]}>
               {item.likes_count}
             </Text>
           </TouchableOpacity>
 
           <View style={styles.actionButton}>
-            <Text style={styles.actionIcon}>💬</Text>
+            <Image 
+              source={require('../../assets/icon/comment.png')}
+              style={[
+                styles.actionIcon,
+                { tintColor: isDarkMode ? '#fff' : '#666' }
+              ]}
+            />
             <Text style={[styles.actionCount, { color: isDarkMode ? '#fff' : '#000' }]}>
               {item.replies_count}
             </Text>
@@ -594,12 +607,14 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(29, 161, 242, 0.1)',
   },
   actionIcon: {
-    fontSize: 16,
+    width: 16,
+    height: 16,
     opacity: 0.6,
   },
   actionIconActive: {
     opacity: 1,
     transform: [{ scale: 1.1 }],
+    tintColor: '#1DA1F2',
   },
   actionCount: {
     fontSize: 12,
