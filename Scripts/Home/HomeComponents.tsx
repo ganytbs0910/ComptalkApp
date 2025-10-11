@@ -10,6 +10,7 @@ import {
   Alert,
   ActivityIndicator,
   FlatList,
+  Image,
 } from 'react-native';
 import { supabase } from '../supabaseClient';
 
@@ -18,6 +19,11 @@ interface Post {
   content: string;
   created_at: string;
   user_id: string;
+  profiles: {
+    name: string | null;
+    avatar_url: string | null;
+    complex_level: number;
+  };
 }
 
 export default function Home() {
@@ -36,7 +42,14 @@ export default function Home() {
     try {
       const { data, error } = await supabase
         .from('posts')
-        .select('*')
+        .select(`
+          *,
+          profiles (
+            name,
+            avatar_url,
+            complex_level
+          )
+        `)
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -95,8 +108,40 @@ export default function Home() {
     }
   };
 
+  const getLevelColor = (level: number) => {
+    const colors = {
+      1: '#4CAF50',
+      2: '#8BC34A',
+      3: '#FFC107',
+      4: '#FF9800',
+      5: '#F44336',
+    };
+    return colors[level as keyof typeof colors] || '#888';
+  };
+
   const renderPost = ({ item }: { item: Post }) => (
     <View style={[styles.postCard, { backgroundColor: isDarkMode ? '#1a1a1a' : '#f5f5f5' }]}>
+      <View style={styles.postHeader}>
+        <View style={styles.userInfo}>
+          {item.profiles?.avatar_url ? (
+            <Image source={{ uri: item.profiles.avatar_url }} style={styles.avatar} />
+          ) : (
+            <View style={[styles.avatarPlaceholder, { backgroundColor: isDarkMode ? '#333' : '#ddd' }]}>
+              <Text style={styles.avatarPlaceholderText}>👤</Text>
+            </View>
+          )}
+          <View style={styles.userDetails}>
+            <Text style={[styles.userName, { color: isDarkMode ? '#fff' : '#000' }]}>
+              {item.profiles?.name || '名前未設定'}
+            </Text>
+            <View style={styles.levelBadge}>
+              <Text style={[styles.levelText, { color: getLevelColor(item.profiles?.complex_level || 1) }]}>
+                コンプレックスレベル {item.profiles?.complex_level || 1}
+              </Text>
+            </View>
+          </View>
+        </View>
+      </View>
       <Text style={[styles.postContent, { color: isDarkMode ? '#fff' : '#000' }]}>
         {item.content}
       </Text>
@@ -200,9 +245,48 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     marginBottom: 10,
   },
+  postHeader: {
+    marginBottom: 12,
+  },
+  userInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  avatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+  },
+  avatarPlaceholder: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  avatarPlaceholderText: {
+    fontSize: 24,
+  },
+  userDetails: {
+    marginLeft: 12,
+    flex: 1,
+  },
+  userName: {
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  levelBadge: {
+    alignSelf: 'flex-start',
+  },
+  levelText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
   postContent: {
     fontSize: 16,
     marginBottom: 8,
+    lineHeight: 22,
   },
   postTime: {
     fontSize: 12,
