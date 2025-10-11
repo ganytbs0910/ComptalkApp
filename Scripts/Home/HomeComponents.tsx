@@ -24,6 +24,8 @@ interface Post {
     avatar_url: string | null;
     complex_level: number;
   };
+  likes_count: number;
+  shares_count: number;
 }
 
 export default function Home() {
@@ -33,13 +35,70 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [posts, setPosts] = useState<Post[]>([]);
   const [loadingPosts, setLoadingPosts] = useState(true);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [userLikedPosts, setUserLikedPosts] = useState<Set<string>>(new Set());
+  const [userSharedPosts, setUserSharedPosts] = useState<Set<string>>(new Set());
 
   useEffect(() => {
+    getCurrentUser();
     fetchPosts();
+
+    // いいねと共有のリアルタイム更新を購読
+    const likesSubscription = supabase
+      .channel('likes_changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'likes' },
+        () => {
+          fetchPosts();
+        }
+      )
+      .subscribe();
+
+    const sharesSubscription = supabase
+      .channel('shares_changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'shares' },
+        () => {
+          fetchPosts();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      likesSubscription.unsubscribe();
+      sharesSubscription.unsubscribe();
+    };
   }, []);
+
+  const getCurrentUser = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      setCurrentUserId(user.id);
+    }
+  };
+
+  const getTimeAgo = (timestamp: string) => {
+    const now = new Date().getTime();
+    const postTime = new Date(timestamp).getTime();
+    const diffInSeconds = Math.floor((now - postTime) / 1000);
+
+    if (diffInSeconds < 60) {
+      return `${diffInSeconds}秒前`;
+    } else if (diffInSeconds < 3600) {
+      return `${Math.floor(diffInSeconds / 60)}分前`;
+    } else if (diffInSeconds < 86400) {
+      return `${Math.floor(diffInSeconds / 3600)}時間前`;
+    } else {
+      return `${Math.floor(diffInSeconds / 86400)}日前`;
+    }
+  };
 
   const fetchPosts = async () => {
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+
       const { data, error } = await supabase
         .from('posts')
         .select(`
@@ -57,7 +116,54 @@ export default function Home() {
         return;
       }
 
-      setPosts(data || []);
+      if (!data) {
+        setPosts([]);
+        return;
+      }
+
+      // いいねと共有の数を取得
+      const postsWithCounts = await Promise.all(
+        data.map(async (post) => {
+          const { count: likesCount } = await supabase
+            .from('likes')
+            .select('*', { count: 'exact', head: true })
+            .eq('post_id', post.id);
+
+          const { count: sharesCount } = await supabase
+            .from('shares')
+            .select('*', { count: 'exact', head: true })
+            .eq('post_id', post.id);
+
+          return {
+            ...post,
+            likes_count: likesCount || 0,
+            shares_count: sharesCount || 0,
+          };
+        })
+      );
+
+      setPosts(postsWithCounts);
+
+      // ユーザーがいいね・共有した投稿を取得
+      if (user) {
+        const { data: likedData } = await supabase
+          .from('likes')
+          .select('post_id')
+          .eq('user_id', user.id);
+
+        const { data: sharedData } = await supabase
+          .from('shares')
+          .select('post_id')
+          .eq('user_id', user.id);
+
+        if (likedData) {
+          setUserLikedPosts(new Set(likedData.map(like => like.post_id)));
+        }
+
+        if (sharedData) {
+          setUserSharedPosts(new Set(sharedData.map(share => share.post_id)));
+        }
+      }
     } catch (error) {
       console.error('予期しないエラー:', error);
     } finally {
@@ -108,6 +214,130 @@ export default function Home() {
     }
   };
 
+  const handleLike = async (postId: string) => {
+    if (!currentUserId) {
+      Alert.alert('エラー', 'ログインが必要です');
+      return;
+    }
+
+    // 既にいいね済みの場合は何もしない
+    if (userLikedPosts.has(postId)) {
+      return;
+    }
+
+    // 楽観的UI更新: いいね済みとして即座にマークし、カウントを+1
+    setUserLikedPosts(prev => new Set([...prev, postId]));
+    setPosts(prevPosts => 
+      prevPosts.map(post => 
+        post.id === postId 
+          ? { ...post, likes_count: post.likes_count + 1 }
+          : post
+      )
+    );
+
+    try {
+      // いいねを追加
+      const { error } = await supabase
+        .from('likes')
+        .insert({ post_id: postId, user_id: currentUserId });
+
+      if (error) {
+        // エラーが発生した場合は楽観的更新を元に戻す
+        setUserLikedPosts(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(postId);
+          return newSet;
+        });
+        setPosts(prevPosts => 
+          prevPosts.map(post => 
+            post.id === postId 
+              ? { ...post, likes_count: post.likes_count - 1 }
+              : post
+          )
+        );
+        console.error('いいねエラー:', error);
+      }
+      // 成功した場合、リアルタイム購読が自動的にfetchPostsを呼び出す
+    } catch (error) {
+      // エラーが発生した場合は楽観的更新を元に戻す
+      setUserLikedPosts(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(postId);
+        return newSet;
+      });
+      setPosts(prevPosts => 
+        prevPosts.map(post => 
+          post.id === postId 
+            ? { ...post, likes_count: post.likes_count - 1 }
+            : post
+        )
+      );
+      console.error('いいねエラー:', error);
+    }
+  };
+
+  const handleShare = async (postId: string) => {
+    if (!currentUserId) {
+      Alert.alert('エラー', 'ログインが必要です');
+      return;
+    }
+
+    // 既に共有済みの場合は何もしない
+    if (userSharedPosts.has(postId)) {
+      return;
+    }
+
+    // 楽観的UI更新: 共有済みとして即座にマークし、カウントを+1
+    setUserSharedPosts(prev => new Set([...prev, postId]));
+    setPosts(prevPosts => 
+      prevPosts.map(post => 
+        post.id === postId 
+          ? { ...post, shares_count: post.shares_count + 1 }
+          : post
+      )
+    );
+
+    try {
+      // 共有を追加
+      const { error } = await supabase
+        .from('shares')
+        .insert({ post_id: postId, user_id: currentUserId });
+
+      if (error) {
+        // エラーが発生した場合は楽観的更新を元に戻す
+        setUserSharedPosts(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(postId);
+          return newSet;
+        });
+        setPosts(prevPosts => 
+          prevPosts.map(post => 
+            post.id === postId 
+              ? { ...post, shares_count: post.shares_count - 1 }
+              : post
+          )
+        );
+        console.error('共有エラー:', error);
+      }
+      // 成功した場合、リアルタイム購読が自動的にfetchPostsを呼び出す
+    } catch (error) {
+      // エラーが発生した場合は楽観的更新を元に戻す
+      setUserSharedPosts(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(postId);
+        return newSet;
+      });
+      setPosts(prevPosts => 
+        prevPosts.map(post => 
+          post.id === postId 
+            ? { ...post, shares_count: post.shares_count - 1 }
+            : post
+        )
+      );
+      console.error('共有エラー:', error);
+    }
+  };
+
   const getLevelColor = (level: number) => {
     const colors = {
       1: '#4CAF50',
@@ -119,37 +349,64 @@ export default function Home() {
     return colors[level as keyof typeof colors] || '#888';
   };
 
-  const renderPost = ({ item }: { item: Post }) => (
-    <View style={[styles.postCard, { backgroundColor: isDarkMode ? '#1a1a1a' : '#f5f5f5' }]}>
-      <View style={styles.postHeader}>
-        <View style={styles.userInfo}>
-          {item.profiles?.avatar_url ? (
-            <Image source={{ uri: item.profiles.avatar_url }} style={styles.avatar} />
-          ) : (
-            <View style={[styles.avatarPlaceholder, { backgroundColor: isDarkMode ? '#333' : '#ddd' }]}>
-              <Text style={styles.avatarPlaceholderText}>👤</Text>
-            </View>
-          )}
-          <View style={styles.userDetails}>
-            <Text style={[styles.userName, { color: isDarkMode ? '#fff' : '#000' }]}>
-              {item.profiles?.name || '名前未設定'}
-            </Text>
-            <View style={styles.levelBadge}>
-              <Text style={[styles.levelText, { color: getLevelColor(item.profiles?.complex_level || 1) }]}>
-                コンプレックスレベル {item.profiles?.complex_level || 1}
+  const renderPost = ({ item }: { item: Post }) => {
+    const isLiked = userLikedPosts.has(item.id);
+    const isShared = userSharedPosts.has(item.id);
+
+    return (
+      <View style={[styles.postCard, { backgroundColor: isDarkMode ? '#1a1a1a' : '#f5f5f5' }]}>
+        <View style={styles.postHeader}>
+          <View style={styles.userInfo}>
+            {item.profiles?.avatar_url ? (
+              <Image source={{ uri: item.profiles.avatar_url }} style={styles.avatar} />
+            ) : (
+              <View style={[styles.avatarPlaceholder, { backgroundColor: isDarkMode ? '#333' : '#ddd' }]}>
+                <Text style={styles.avatarPlaceholderText}>👤</Text>
+              </View>
+            )}
+            <View style={styles.userDetails}>
+              <Text style={[styles.userName, { color: isDarkMode ? '#fff' : '#000' }]}>
+                {item.profiles?.name || '名前未設定'}
               </Text>
+              <View style={styles.levelBadge}>
+                <Text style={[styles.levelText, { color: getLevelColor(item.profiles?.complex_level || 1) }]}>
+                  コンプレックスレベル {item.profiles?.complex_level || 1}
+                </Text>
+              </View>
             </View>
           </View>
+          <Text style={styles.postTime}>
+            {getTimeAgo(item.created_at)}
+          </Text>
+        </View>
+        <Text style={[styles.postContent, { color: isDarkMode ? '#fff' : '#000' }]}>
+          {item.content}
+        </Text>
+        
+        <View style={styles.actionsContainer}>
+          <TouchableOpacity 
+            style={[styles.actionButton, isLiked && styles.actionButtonActive]}
+            onPress={() => handleLike(item.id)}
+            disabled={isLiked}>
+            <Text style={[styles.actionIcon, isLiked && styles.actionIconActive]}>❤️</Text>
+            <Text style={[styles.actionCount, { color: isDarkMode ? '#fff' : '#000' }]}>
+              {item.likes_count}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={[styles.actionButton, isShared && styles.actionButtonActive]}
+            onPress={() => handleShare(item.id)}
+            disabled={isShared}>
+            <Text style={[styles.actionIcon, isShared && styles.actionIconActive]}>🔁</Text>
+            <Text style={[styles.actionCount, { color: isDarkMode ? '#fff' : '#000' }]}>
+              {item.shares_count}
+            </Text>
+          </TouchableOpacity>
         </View>
       </View>
-      <Text style={[styles.postContent, { color: isDarkMode ? '#fff' : '#000' }]}>
-        {item.content}
-      </Text>
-      <Text style={styles.postTime}>
-        {new Date(item.created_at).toLocaleString('ja-JP')}
-      </Text>
-    </View>
-  );
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -246,11 +503,15 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   postHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
     marginBottom: 12,
   },
   userInfo: {
     flexDirection: 'row',
     alignItems: 'center',
+    flex: 1,
   },
   avatar: {
     width: 50,
@@ -285,12 +546,41 @@ const styles = StyleSheet.create({
   },
   postContent: {
     fontSize: 16,
-    marginBottom: 8,
+    marginBottom: 12,
     lineHeight: 22,
   },
   postTime: {
     fontSize: 12,
     color: '#888',
+    marginLeft: 8,
+  },
+  actionsContainer: {
+    flexDirection: 'row',
+    gap: 20,
+    marginTop: 8,
+  },
+  actionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+  },
+  actionButtonActive: {
+    backgroundColor: 'rgba(29, 161, 242, 0.1)',
+  },
+  actionIcon: {
+    fontSize: 20,
+    opacity: 0.6,
+  },
+  actionIconActive: {
+    opacity: 1,
+    transform: [{ scale: 1.1 }],
+  },
+  actionCount: {
+    fontSize: 14,
+    fontWeight: '600',
   },
   floatingButton: {
     position: 'absolute',
