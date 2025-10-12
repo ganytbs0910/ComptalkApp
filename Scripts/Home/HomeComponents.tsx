@@ -15,6 +15,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import { supabase } from '../supabaseClient';
+import { COMPLEX_CATEGORIES, getCategoryLabel, getCategoryIcon } from '../constants/complexCategories';
 
 interface Post {
   id: string;
@@ -33,19 +34,6 @@ interface Post {
   post_complexes?: Array<{ category: string }>;
   engagement_score?: number;
 }
-
-const COMPLEX_CATEGORIES = [
-  { key: 'appearance', label: '容姿', icon: '👤' },
-  { key: 'debt', label: '借金', icon: '💰' },
-  { key: 'job', label: '仕事', icon: '💼' },
-  { key: 'education', label: '学歴', icon: '🎓' },
-  { key: 'health', label: '健康', icon: '🏥' },
-  { key: 'relationship', label: '人間関係', icon: '👥' },
-  { key: 'family', label: '家族', icon: '👨‍👩‍👧' },
-  { key: 'income', label: '収入', icon: '💵' },
-  { key: 'age', label: '年齢', icon: '🎂' },
-  { key: 'personality', label: '性格', icon: '🎭' },
-];
 
 type FeedType = 'all' | 'following' | 'trending';
 
@@ -745,14 +733,6 @@ export default function Home() {
     if (level <= 60) return '#FFC107';
     if (level <= 80) return '#FF9800';
     return '#F44336';
-  };
-
-  const getCategoryLabel = (category: string) => {
-    return COMPLEX_CATEGORIES.find(c => c.key === category)?.label || category;
-  };
-
-  const getCategoryIcon = (category: string) => {
-    return COMPLEX_CATEGORIES.find(c => c.key === category)?.icon || '📌';
   };
 
   const getRankColor = (index: number) => {

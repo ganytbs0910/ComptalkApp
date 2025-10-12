@@ -13,6 +13,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { supabase } from '../supabaseClient';
+import { COMPLEX_CATEGORIES } from '../constants/complexCategories';
 
 interface Post {
   id: string;
@@ -27,25 +28,6 @@ interface Post {
   likes_count: number;
   shares_count: number;
 }
-
-interface ComplexCategory {
-  key: string;
-  label: string;
-  icon: string;
-}
-
-const COMPLEX_CATEGORIES: ComplexCategory[] = [
-  { key: 'appearance', label: '容姿', icon: '👤' },
-  { key: 'debt', label: '借金', icon: '💰' },
-  { key: 'job', label: '仕事', icon: '💼' },
-  { key: 'education', label: '学歴', icon: '🎓' },
-  { key: 'health', label: '健康', icon: '🏥' },
-  { key: 'relationship', label: '人間関係', icon: '👥' },
-  { key: 'family', label: '家族', icon: '👨‍👩‍👧' },
-  { key: 'income', label: '収入', icon: '💵' },
-  { key: 'age', label: '年齢', icon: '🎂' },
-  { key: 'personality', label: '性格', icon: '🎭' },
-];
 
 function SearchComponents() {
   const isDarkMode = useColorScheme() === 'dark';
