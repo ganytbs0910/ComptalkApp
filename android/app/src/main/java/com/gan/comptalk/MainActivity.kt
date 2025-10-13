@@ -1,4 +1,4 @@
-package com.comptalkapp
+package com.gan.comptalk
 
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate

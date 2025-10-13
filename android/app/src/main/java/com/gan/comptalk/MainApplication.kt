@@ -1,4 +1,4 @@
-package com.comptalkapp
+package com.gan.comptalk
 
 import android.app.Application
 import com.facebook.react.PackageList
