@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "863179928767",
+    "project_id": "comptalk-f055d",
+    "storage_bucket": "comptalk-f055d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:863179928767:android:80ade9001ebb3e5254420a",
+        "android_client_info": {
+          "package_name": "org.reactjs.native.example.ComptalkApp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC-LfKTjK2F_OX0vmpUMzZffv7fAwoz3b4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
