@@ -17,6 +17,7 @@ import Bookmarks from './Scripts/Profile/BookmarksComponents';
 import Auth from './Scripts/Auth/AuthComponents';
 import Messages from './Scripts/Messages/MessagesComponents';
 import { supabase } from './Scripts/supabaseClient';
+import mobileAds from 'react-native-google-mobile-ads';
 
 type TabType = 'home' | 'search' | 'bookmarks' | 'notifications' | 'messages' | 'profile';
 
@@ -29,6 +30,7 @@ export default function App() {
   const [unreadMessages, setUnreadMessages] = useState(0);
 
   useEffect(() => {
+    
     checkAuth();
 
     const authSubscription = supabase.auth.onAuthStateChange((event, session) => {

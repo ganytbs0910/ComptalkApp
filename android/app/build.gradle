@@ -1,6 +1,7 @@
 apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
+apply plugin: "com.google.gms.google-services"
 
 /**
  * This is the configuration block to customize your React Native Android app.
@@ -85,10 +86,10 @@ android {
         applicationId "com.gan.comptalk"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode 5
+        versionName "1.5"
     }
-    
+
     flavorDimensions "store"
     productFlavors {
         play {
@@ -101,7 +102,7 @@ android {
         release {
             storeFile file('release.keystore')
             storePassword 'Gankou1182'
-            keyAlias 'your-key-alias'
+            keyAlias 'comptalk-key'
             keyPassword 'Gankou1182'
         }
     }
